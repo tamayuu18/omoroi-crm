@@ -116,10 +116,16 @@ javascript:(function(){
   function normalize(rec) {
     var memo   = rec.hearingMemo || rec.memo || rec.note || rec.comment || rec.ヒアリングメモ || '';
     var parsed = parseMemo(memo);
+    // メモから電話番号・メールが取れない場合はAPI直接フィールドを使う
+    var phone  = rec.phone || rec.tel || rec.phoneNumber || rec.電話番号 || parsed.phone || '';
+    var email  = rec.email || rec.mailAddress || rec.emailAddress || rec.メールアドレス || parsed.email || '';
     return {
       name:         rec.name       || rec.customerName  || rec.fullName    || '',
-      email:        rec.email      || rec.メールアドレス || '',
-      phone:        rec.phone      || rec.tel            || rec.電話番号    || '',
+      kana:         rec.kana       || rec.furigana       || parsed.kana    || '',
+      email:        email,
+      phone:        phone,
+      age:          rec.age        || parsed.age         || '',
+      gender:       rec.gender     || parsed.gender      || '',
       sendDate:     normDate(rec.referralDate || rec.createdAt || rec.scheduledAt || rec.interviewDate || ''),
       ca:           rec.staffName  || rec.assignee       || rec.担当者      || '',
       timing:       parsed.timing  || rec.transferTiming || '',
@@ -132,11 +138,42 @@ javascript:(function(){
 
   // ============================================================
   // ヒアリングメモのパース
-  // 「現年収　：300万」「希望年収　：300万」「転職時期　：良いところがあればすぐに」
+  // メモ形式例:
+  //   名前　：生駒翔平
+  //   ふりがな　：いこましょうへい
+  //   性別　：男性
+  //   生年月日　：1996年7月23日
+  //   電話番号　：07017719439
+  //   現年収　：300万
+  //   希望年収　：300万
+  //   転職時期　：良いところがあればすぐに
   // ============================================================
   function parseMemo(memo) {
-    var r = { salary: '', hopeSalary: '', timing: '' };
+    var r = { salary: '', hopeSalary: '', timing: '', phone: '', email: '', kana: '', age: '', gender: '' };
     if (!memo) return r;
+    function mf(patterns) {
+      for (var i = 0; i < patterns.length; i++) {
+        var m = memo.match(new RegExp(patterns[i] + '[\\s　]*[：:][\\s　]*([^\\n]+)'));
+        if (m) return m[1].trim();
+      }
+      return '';
+    }
+    r.phone     = mf(['電話番号']);
+    r.email     = mf(['メールアドレス', 'Email', 'email']);
+    r.kana      = mf(['ふりがな', 'フリガナ', '読み']);
+    r.gender    = mf(['性別']);
+    var birth   = mf(['生年月日']);
+    if (birth) {
+      // 生年月日から年齢を計算
+      var bm = birth.match(/(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
+      if (bm) {
+        var today = new Date();
+        var age = today.getFullYear() - parseInt(bm[1]);
+        var monthDiff = today.getMonth() + 1 - parseInt(bm[2]);
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < parseInt(bm[3]))) age--;
+        r.age = String(age);
+      }
+    }
     var s  = memo.match(/現[在職]?年収\s*[：:]\s*([\d,，万円]+)/);
     var hs = memo.match(/希望年収\s*[：:]\s*([\d,，万円]+)/);
     var t  = memo.match(/転職時期\s*[：:]\s*([^\n。、]+)/);

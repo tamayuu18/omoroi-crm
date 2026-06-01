@@ -55,7 +55,9 @@ function doPost(e) {
     records.forEach(function(rec) {
       var email = String(rec.email || '').trim().toLowerCase();
       var phone = normalizePhone_(String(rec.phone || '').trim());
-      var key   = email || phone;
+      var name  = String(rec.name  || '').trim();
+      // メール・電話番号がない場合は氏名をキーとして使用（スキップしない）
+      var key   = email || phone || name;
 
       if (!key) { skipped++; return; }
       if (existingKeys[key]) { skipped++; return; }
@@ -128,11 +130,13 @@ function buildForesmaImportIndex_(sheet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return index;
 
-  // 列7=電話番号(G), 列8=メールアドレス(H)
-  var data = sheet.getRange(2, 7, lastRow - 1, 2).getValues();
+  // 列5=氏名(E), 列7=電話番号(G), 列8=メールアドレス(H)
+  var data = sheet.getRange(2, 5, lastRow - 1, 4).getValues();
   data.forEach(function(row) {
-    var phone = normalizePhone_(String(row[0] || '').trim());
-    var email = String(row[1] || '').trim().toLowerCase();
+    var name  = String(row[0] || '').trim();
+    var phone = normalizePhone_(String(row[2] || '').trim());
+    var email = String(row[3] || '').trim().toLowerCase();
+    if (name)  index[name]  = true;
     if (phone) index[phone] = true;
     if (email) index[email] = true;
   });
