@@ -11,7 +11,7 @@
 //
 // 【設定シートに追加が必要な項目】
 // 設定シートの「TimeRex設定」セクション（setupTimeRexSettings_で自動作成）:
-//   - TimeRex送信元メールアドレス（例: noreply@timerex.net）
+//   - TimeRex送信元メールアドレス（例: notifications@timerex.net）
 //   - 処理済みラベル名（例: CRM処理済）
 //   - デフォルト担当CA
 // ============================================================
@@ -95,7 +95,7 @@ function importTimeRexFromGmail() {
     ui.alert(
       '設定が必要です',
       '設定シートの「TimeRex送信元メールアドレス」にTimeRexの通知メール送信元を入力してください。\n\n' +
-      '例: noreply@timerex.net\n\n' +
+      '例: notifications@timerex.net\n\n' +
       '設定シートの右側「TimeRex設定」エリアに記入してください。',
       ui.ButtonSet.OK
     );
@@ -585,7 +585,7 @@ function generateMeetingId_(meetingSheet) {
 function loadTimeRexConfig_(ss) {
   var config = {
     gmailAccount:  CRM_GMAIL_ACCOUNT,
-    senderEmail:   'noreply@timerex.net',
+    senderEmail:   'notifications@timerex.net',
     doneLabel:     'CRM処理済',
     defaultCa:     '',
     defaultMethod: 'Zoom'
@@ -599,7 +599,7 @@ function loadTimeRexConfig_(ss) {
     var label = String(row[0] || '').trim();
     var value = String(row[1] || '').trim();
     if (label === TIMEREX_SETTINGS.GMAIL_ACCOUNT_LABEL)  config.gmailAccount  = value || CRM_GMAIL_ACCOUNT;
-    if (label === TIMEREX_SETTINGS.SENDER_LABEL)         config.senderEmail   = value || 'noreply@timerex.net';
+    if (label === TIMEREX_SETTINGS.SENDER_LABEL)         config.senderEmail   = value || 'notifications@timerex.net';
     if (label === TIMEREX_SETTINGS.DONE_LABEL)           config.doneLabel     = value || 'CRM処理済';
     if (label === TIMEREX_SETTINGS.DEFAULT_CA_LABEL)     config.defaultCa     = value;
     if (label === TIMEREX_SETTINGS.DEFAULT_METHOD_LABEL) config.defaultMethod  = value || 'Zoom';
@@ -672,7 +672,7 @@ function setupTimeRexSettings() {
   var settings = [
     ['■ TimeRex設定', ''],
     [TIMEREX_SETTINGS.GMAIL_ACCOUNT_LABEL,   CRM_GMAIL_ACCOUNT],
-    [TIMEREX_SETTINGS.SENDER_LABEL,          'noreply@timerex.net'],
+    [TIMEREX_SETTINGS.SENDER_LABEL,          'notifications@timerex.net'],
     [TIMEREX_SETTINGS.DONE_LABEL,            'CRM処理済'],
     [TIMEREX_SETTINGS.DEFAULT_CA_LABEL,      ''],
     [TIMEREX_SETTINGS.DEFAULT_METHOD_LABEL,  'Zoom']
@@ -693,7 +693,7 @@ function setupTimeRexSettings() {
     '  Apps Script エディタで「承認」する際に\n' +
     '  このGoogleアカウントでログインしてください。\n\n' +
     '【確認】TimeRex送信元メールアドレス:\n' +
-    '  noreply@timerex.net（変更が必要な場合は設定シートで修正）\n\n' +
+    '  notifications@timerex.net（変更が必要な場合は設定シートで修正）\n\n' +
     '【任意】TimeRexデフォルト担当CA:\n' +
     '  担当CAが特定できない場合に使用されます。',
     SpreadsheetApp.getUi().ButtonSet.OK
