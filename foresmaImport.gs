@@ -168,17 +168,19 @@ function processOneForesmaRow_(row, now, customerSheet, taskSheet, customerIndex
   var sendDate  = row[FORESMA_COL.SEND_DATE];
 
   var missing = [];
-  if (!name)                  missing.push('氏名');
-  if (!phone && !email)       missing.push('電話番号またはメールアドレス');
-  if (!sendDate)              missing.push('送客日');
+  if (!name) missing.push('氏名');
   if (missing.length > 0) {
     throw new Error('必須項目が未入力です: ' + missing.join('、'));
   }
 
+  // 送客日がない場合は今日を使用
+  if (!sendDate) sendDate = new Date();
+
   // --- 重複チェック ---
-  // 優先順位: メール → 電話番号
+  // 優先順位: メール → 電話番号 → 氏名
   if (email && customerIndex.byEmail[email]) return 'duplicate';
   if (phone && customerIndex.byPhone[phone]) return 'duplicate';
+  if (!email && !phone && customerIndex.byName[name]) return 'duplicate';
 
   // --- 顧客ID発行 ---
   var customerId = generateCustomerId_(customerSheet);
@@ -191,6 +193,7 @@ function processOneForesmaRow_(row, now, customerSheet, taskSheet, customerIndex
   // インデックスを更新（同一バッチ内の重複を防ぐ）
   if (email) customerIndex.byEmail[email] = customerId;
   if (phone) customerIndex.byPhone[phone] = customerId;
+  if (name)  customerIndex.byName[name]   = customerId;
 
   // --- タスク作成（初回連絡） ---
   var taskId    = generateTaskId_(taskSheet);
@@ -205,20 +208,22 @@ function processOneForesmaRow_(row, now, customerSheet, taskSheet, customerIndex
 // 顧客マスタのインデックス構築（重複チェック用）
 // ============================================================
 function buildCustomerIndex_(customerSheet) {
-  var index = { byEmail: {}, byPhone: {} };
+  var index = { byEmail: {}, byPhone: {}, byName: {} };
   var lastRow = customerSheet.getLastRow();
   if (lastRow < 2) return index;
 
   var data = customerSheet.getRange(2, 1, lastRow - 1,
-    Math.max(CUSTOMER_COL.EMAIL, CUSTOMER_COL.PHONE) + 1).getValues();
+    Math.max(CUSTOMER_COL.EMAIL, CUSTOMER_COL.PHONE, CUSTOMER_COL.NAME) + 1).getValues();
 
   data.forEach(function(row) {
     var phone = normalizePhone_(String(row[CUSTOMER_COL.PHONE] || '').trim());
     var email = String(row[CUSTOMER_COL.EMAIL] || '').trim().toLowerCase();
+    var name  = String(row[CUSTOMER_COL.NAME]  || '').trim();
     var id    = String(row[CUSTOMER_COL.ID] || '').trim();
     if (!id) return;
     if (email) index.byEmail[email] = id;
     if (phone) index.byPhone[phone] = id;
+    if (name)  index.byName[name]   = id;
   });
 
   return index;
