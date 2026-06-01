@@ -11,6 +11,10 @@
  *
  * 【使い方】
  * Lreach CRM の「顧客管理」ページを開いてブックマークをクリック
+ *
+ * 【注意】
+ * - ブックマークとして保存する際、ファイル内の改行・コメントは削除してください
+ * - 日本語文字は \uXXXX 形式にエスケープしてある版（lreach_bookmarklet.min.js）を使用してください
  */
 javascript:(function(){
 
@@ -21,15 +25,12 @@ javascript:(function(){
 
   // ============================================================
   // Step1: __NEXT_DATA__ からAPIデータを取得（最優先）
-  // Next.js(Vercel)アプリはここにサーバーサイドデータを持つ
-  // コンソールに "Loaded reservations: 76 ▶ Array(76)" が出ているため
-  // "reservations" キーを最優先で探す
   // ============================================================
   function getRecordsFromNextData() {
     try {
       var nd = window.__NEXT_DATA__;
       if (!nd) return null;
-      return findArraysInObject(nd.props, 'reservations', 'referrals', 'customers', 'leads', 'records');
+      return findArraysInObject(nd.props);
     } catch(e) { return null; }
   }
 
@@ -81,8 +82,6 @@ javascript:(function(){
 
   // ============================================================
   // Step3: DOMテーブルから取得（フォールバック）
-  // 列順（実際の画面確認済み）:
-  //   名前 | ステータス | 面談日 | 開始時間 | 終了時間 | 担当者 | ヒアリングメモ
   // ============================================================
   function getRecordsFromDOM() {
     var rows = document.querySelectorAll('table tbody tr');
@@ -114,11 +113,10 @@ javascript:(function(){
   // __NEXT_DATA__ / React Fiber の生データ → CRMフォーマット変換
   // ============================================================
   function normalize(rec) {
-    var memo   = rec.hearingMemo || rec.memo || rec.note || rec.comment || rec.ヒアリングメモ || '';
+    var memo   = rec.hearingMemo || rec.memo || rec.note || rec.comment || rec['ヒアリングメモ'] || '';
     var parsed = parseMemo(memo);
-    // メモから電話番号・メールが取れない場合はAPI直接フィールドを使う
-    var phone  = rec.phone || rec.tel || rec.phoneNumber || rec.電話番号 || parsed.phone || '';
-    var email  = rec.email || rec.mailAddress || rec.emailAddress || rec.メールアドレス || parsed.email || '';
+    var phone  = rec.phone || rec.tel || rec.phoneNumber || rec['電話番号'] || parsed.phone || '';
+    var email  = rec.email || rec.mailAddress || rec.emailAddress || rec['メールアドレス'] || parsed.email || '';
     return {
       name:         rec.name       || rec.customerName  || rec.fullName    || '',
       kana:         rec.kana       || rec.furigana       || parsed.kana    || '',
@@ -127,7 +125,7 @@ javascript:(function(){
       age:          rec.age        || parsed.age         || '',
       gender:       rec.gender     || parsed.gender      || '',
       sendDate:     normDate(rec.referralDate || rec.createdAt || rec.scheduledAt || rec.interviewDate || ''),
-      ca:           rec.staffName  || rec.assignee       || rec.担当者      || '',
+      ca:           rec.staffName  || rec.assignee       || rec['担当者']      || '',
       timing:       parsed.timing  || rec.transferTiming || '',
       salary:       parsed.salary  || String(rec.currentSalary  || ''),
       hopeSalary:   parsed.hopeSalary || String(rec.desiredSalary || ''),
@@ -137,26 +135,17 @@ javascript:(function(){
   }
 
   // ============================================================
-  // ヒアリングメモのパース
-  // メモ形式例:
-  //   名前　：生駒翔平
-  //   ふりがな　：いこましょうへい
-  //   性別　：男性
-  //   生年月日　：1996年7月23日
-  //   電話番号　：07017719439
-  //   現年収　：300万
-  //   希望年収　：300万
-  //   転職時期　：良いところがあればすぐに
+  // ヒアリングメモのパース（型別正規表現）
   // ============================================================
   function parseMemo(memo) {
     var r = { salary: '', hopeSalary: '', timing: '', phone: '', email: '', kana: '', age: '', gender: '' };
     if (!memo) return r;
-    // フリガナ: ひらがな・カタカナのみ抽出（次のフィールドで止める）
-    var kanaM = memo.match(/(?:ふりがな|フリガナ|読み)[\s　]*[：:]\s*([぀-ヿ゠\s　]+?)(?=\s*\S+[：:]|\s*$)/);
+    // フリガナ: ひらがな・カタカナのみ
+    var kanaM = memo.match(/(?:ふりがな|フリガナ|読み)[\s　]*[：:]\s*([぀-ヿ゠･\s　]+?)(?=\s*\S+[：:]|\s*$)/);
     if (kanaM) r.kana = kanaM[1].trim();
-    // 電話番号: 数字とハイフンのみ
+    // 電話番号: 数字・ハイフンのみ
     var phoneM = memo.match(/電話番号[\s　]*[：:]\s*(\d[\d\-\s]{8,14})/);
-    if (phoneM) r.phone = phoneM[1].trim();
+    if (phoneM) r.phone = phoneM[1].replace(/\s/g,'').trim();
     // メールアドレス: メール形式のみ
     var emailM = memo.match(/(?:メールアドレス|Email|email)[\s　]*[：:]\s*([\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,})/);
     if (emailM) r.email = emailM[1].trim();
@@ -168,8 +157,8 @@ javascript:(function(){
     if (birthM) {
       var today = new Date();
       var age = today.getFullYear() - parseInt(birthM[1]);
-      var monthDiff = today.getMonth() + 1 - parseInt(birthM[2]);
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < parseInt(birthM[3]))) age--;
+      var md = today.getMonth() + 1 - parseInt(birthM[2]);
+      if (md < 0 || (md === 0 && today.getDate() < parseInt(birthM[3]))) age--;
       r.age = String(age);
     }
     var s  = memo.match(/現[在職]?年収\s*[：:]\s*([\d,，万円]+)/);
@@ -208,48 +197,72 @@ javascript:(function(){
   // ============================================================
   // 確認ダイアログ
   // ============================================================
-  var preview = records.slice(0, 5).map(function(r){ return '・' + r.name; }).join('\n');
+  var preview = records.slice(0, 5).map(function(r){ return '・' + r.name + (r.phone ? ' (' + r.phone + ')' : ''); }).join('\n');
   if (records.length > 5) preview += '\n  ほか ' + (records.length - 5) + '件';
 
   if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nスプレッドシートに送信しますか？')) return;
 
   // ============================================================
-  // about:blank の新ウィンドウ経由でGASに送信
-  // LreachのCSPはフォーム送信をブロックするが、
-  // about:blankウィンドウはCSPを継承しないため制限なし。
+  // about:blank ポップアップ経由でGASに送信
+  // Lreach の CSP は fetch/form-action を外部ドメインにブロックするが
+  // about:blank ウィンドウは CSP を継承しないため制限なし。
+  // no-cors fetch でシンプルPOST → GAS が doPost を実行。
   // ============================================================
-  var payloadJson = JSON.stringify({ records: records });
+  var payloadBody = 'payload=' + encodeURIComponent(JSON.stringify({ records: records }));
 
-  var w = window.open('', '_blank', 'width=400,height=200');
+  var w = window.open('', '_blank', 'width=360,height=180,left=100,top=100');
   if (!w) {
     alert('ポップアップがブロックされています。\nアドレスバー右端のアイコンをクリックして\nlreach-crm-prototype.vercel.appのポップアップを許可してください。');
     return;
   }
 
-  // about:blankウィンドウにフォームを書き込んで自動送信
-  w.document.open();
+  var escUrl  = JSON.stringify(ENDPOINT_URL);
+  var escBody = JSON.stringify(payloadBody);
+  var cnt     = records.length;
+
   w.document.write(
-    '<!DOCTYPE html><html><head><meta charset="utf-8"></head>' +
-    '<body style="font-family:sans-serif;padding:24px;background:#f8f9fa">' +
-    '<p style="font-size:16px;color:#333">&#128228; CRMに送信中... (' + records.length + '件)</p>' +
-    '<p style="font-size:13px;color:#666">このウィンドウは自動で閉じます</p>' +
-    '<form id="f" method="POST" action="' + ENDPOINT_URL + '">' +
-    '<input type="hidden" name="payload" id="p">' +
-    '</form>' +
+    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<style>body{font-family:sans-serif;padding:20px;background:#f0f4ff;margin:0}' +
+    'p{font-size:15px;color:#333;margin:0 0 8px}' +
+    '.sub{font-size:12px;color:#666}</style>' +
+    '</head><body>' +
+    '<p id="s">&#128228; GASに送信中... (' + cnt + '件)</p>' +
+    '<p class="sub" id="d">絕対にこのウィンドウを閉じないでください</p>' +
     '<script>' +
-    'document.getElementById("p").value=' + JSON.stringify(payloadJson) + ';' +
-    'document.getElementById("f").submit();' +
-    'setTimeout(function(){' +
-    'try{window.close();}catch(e){}' +
-    '},3000);' +
-    '<\/script>' +
-    '</body></html>'
+    'var url=' + escUrl + ';' +
+    'var body=' + escBody + ';' +
+    'fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body,redirect:"follow"})' +
+    '.then(function(){' +
+    '  document.getElementById("s").textContent="✅ 送信完了！";' +
+    '  document.getElementById("d").textContent="このウィンドウを閉じてください";' +
+    '  try{window.opener.postMessage("crm_ok_' + cnt + '","*");}catch(e){}' +
+    '  setTimeout(function(){try{window.close();}catch(e){}},3000);' +
+    '})' +
+    '.catch(function(err){' +
+    '  document.getElementById("s").textContent="❌ エラー: "+err.message;' +
+    '  document.getElementById("d").textContent="エラーが発生しました。コンソールを確認してください";' +
+    '});' +
+    '<\/script></body></html>'
   );
   w.document.close();
 
-  // 元のページで完了通知
-  setTimeout(function() {
-    alert('【CRM取込 完了】\n✅ ' + records.length + '件を送信しました。\n\nForesma取込シートを確認し、\n次に「Foresmaデータを取り込む」を実行してください。');
-  }, 4000);
+  // postMessage で送信完了を受け取る
+  var done = false;
+  function onMsg(ev) {
+    if (typeof ev.data === 'string' && ev.data.indexOf('crm_ok_') === 0 && !done) {
+      done = true;
+      window.removeEventListener('message', onMsg);
+      alert('【CRM取込 完了】\n✅ ' + cnt + '件を送信しました。\n\nForesma取込シートを確認し、\n次に「Foresmaデータを取り込む」を実行してください。');
+    }
+  }
+  window.addEventListener('message', onMsg);
+  // 10秒後にメッセージが来なくても完了扱い（no-corsでopenerへのpostMessageが届かない場合）
+  setTimeout(function(){
+    if (!done) {
+      done = true;
+      window.removeEventListener('message', onMsg);
+      alert('【CRM取込】送信しました。\nForesma取込シートで結果を確認してください。');
+    }
+  }, 10000);
 
 })();
