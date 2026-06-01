@@ -102,52 +102,69 @@ function importTimeRexFromGmail() {
     return;
   }
 
-  // Gmail検索クエリ（未処理のTimeRex通知メール）
-  var query = buildGmailQuery_(config);
-  var threads = GmailApp.search(query, 0, 50); // 最大50件
-
-  if (threads.length === 0) {
-    ui.alert('TimeRex取込', '新しい予約通知メールは見つかりませんでした。', ui.ButtonSet.OK);
-    return;
-  }
-
   var timerexSheet = ss.getSheetByName(SHEET_NAMES.TIMEREX);
   if (!timerexSheet) {
     ui.alert('エラー', '「TimeRex取込」シートが見つかりません。CRMを初期化してください。', ui.ButtonSet.OK);
     return;
   }
 
-  var added   = 0;
-  var skipped = 0;
-  var errors  = [];
-  var doneLabel = getOrCreateLabel_(config.doneLabel);
+  // 既取込のメッセージIDをセットとして保持（重複取込防止）
+  var importedIds = buildImportedMessageIdSet_(timerexSheet);
 
-  threads.forEach(function(thread) {
-    var messages = thread.getMessages();
-    messages.forEach(function(message) {
-      try {
-        var parsed = parseTimeRexEmail_(message, config);
-        if (!parsed) {
+  // Gmail検索：処理済みラベルが付いていないもの全件（過去分含む）
+  var query     = buildGmailQuery_(config);
+  var doneLabel = getOrCreateLabel_(config.doneLabel);
+  var added     = 0;
+  var skipped   = 0;
+  var errors    = [];
+
+  // GmailApp.search は1回500件まで。500件超の場合はページングで全件取得
+  var offset  = 0;
+  var batch   = 500;
+  var threads;
+
+  do {
+    threads = GmailApp.search(query, offset, batch);
+
+    threads.forEach(function(thread) {
+      var messages = thread.getMessages();
+      messages.forEach(function(message) {
+        var msgId = message.getId();
+
+        // 既に取込済みのメッセージはスキップ
+        if (importedIds[msgId]) {
           skipped++;
           return;
         }
 
-        // TimeRex取込シートに1行追加
-        appendTimeRexRow_(timerexSheet, parsed);
-        added++;
-        appendLog_(ss, 'Gmail取込', parsed.name || '（氏名不明）',
-          'TimeRex予約メールを取込しました', '成功', message.getSubject());
+        try {
+          var parsed = parseTimeRexEmail_(message, config);
+          if (!parsed) {
+            skipped++;
+            return;
+          }
 
-      } catch (e) {
-        errors.push(message.getSubject() + ': ' + e.message);
-        appendLog_(ss, 'Gmail取込エラー', message.getSubject(), e.message, 'エラー', e.stack);
-      }
+          // メッセージIDを付加して取込シートに追記
+          parsed.messageId = msgId;
+          appendTimeRexRow_(timerexSheet, parsed);
+          importedIds[msgId] = true;
+          added++;
+          appendLog_(ss, 'Gmail取込', parsed.name || '（氏名不明）',
+            'TimeRex予約メールを取込しました', '成功', message.getSubject());
+
+        } catch (e) {
+          errors.push(message.getSubject() + ': ' + e.message);
+          appendLog_(ss, 'Gmail取込エラー', message.getSubject(), e.message, 'エラー', e.stack);
+        }
+      });
+
+      // 処理済みラベルを付与してアーカイブ
+      if (doneLabel) thread.addLabel(doneLabel);
+      thread.moveToArchive();
     });
 
-    // 処理済みラベルを付与してアーカイブ
-    if (doneLabel) thread.addLabel(doneLabel);
-    thread.moveToArchive();
-  });
+    offset += batch;
+  } while (threads.length === batch); // batch件返ってきた場合は次ページも取得
 
   // 取込シートのデータを顧客マスタ・面談管理に反映
   if (added > 0) {
@@ -475,7 +492,8 @@ function normalizeMeetingMethod_(raw, defaultMethod) {
 // TimeRex取込シートへ追記
 // ============================================================
 function appendTimeRexRow_(timerexSheet, parsed) {
-  var row = new Array(14).fill('');
+  // 15列目（index 14）にGmailメッセージIDを保存（重複取込防止用）
+  var row = new Array(15).fill('');
   row[TIMEREX_COL.STATUS]      = '未取込';
   row[TIMEREX_COL.IMPORT_DT]   = '';
   row[TIMEREX_COL.BOOKING_ID]  = parsed.bookingId  || '';
@@ -490,6 +508,7 @@ function appendTimeRexRow_(timerexSheet, parsed) {
   row[TIMEREX_COL.CA]          = parsed.ca           || '';
   row[TIMEREX_COL.MEMO]        = parsed.memo         || '';
   row[TIMEREX_COL.BOOKING_URL] = parsed.bookingUrl  || '';
+  row[14]                      = parsed.messageId   || '';  // GmailメッセージID（重複防止用）
   timerexSheet.appendRow(row);
 }
 
@@ -567,13 +586,30 @@ function getOrCreateLabel_(labelName) {
 }
 
 // ============================================================
+// 取込済みGmailメッセージIDのセットを構築（重複取込防止）
+// ============================================================
+function buildImportedMessageIdSet_(timerexSheet) {
+  var ids = {};
+  var lastRow = timerexSheet.getLastRow();
+  if (lastRow < 2) return ids;
+
+  // 15列目（index 14, 列番号15）にメッセージIDが入っている
+  var data = timerexSheet.getRange(2, 15, lastRow - 1, 1).getValues();
+  data.forEach(function(row) {
+    var id = String(row[0] || '').trim();
+    if (id) ids[id] = true;
+  });
+  return ids;
+}
+
+// ============================================================
 // Gmail検索クエリの構築
 // ============================================================
 function buildGmailQuery_(config) {
   var parts = [];
   if (config.senderEmail) parts.push('from:' + config.senderEmail);
-  if (config.doneLabel)   parts.push('-label:' + config.doneLabel.replace(/\s/g, '-'));
-  parts.push('is:unread OR label:inbox');
+  // 処理済みラベルが付いていないものを対象（過去メールも含む）
+  if (config.doneLabel) parts.push('-label:' + config.doneLabel.replace(/\s/g, '-'));
   return parts.join(' ');
 }
 
