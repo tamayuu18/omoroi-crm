@@ -1,149 +1,201 @@
 /**
- * Foresma Lreach → CRM スプレッドシート 転送ブックマークレット
+ * Foresma Lreach CRM → スプレッドシート 転送ブックマークレット
+ *
+ * 対象URL: lreach-crm-prototype.vercel.app/referrals
+ *
+ * 【登録方法】
+ * 1. このファイルの内容をすべてコピー
+ * 2. ブラウザのブックマークを新規作成
+ * 3. URLの欄に貼り付け（ファイル先頭の javascript: から末尾まで）
+ * 4. 名前: 「CRM: Lreach取込」
  *
  * 【使い方】
- * 1. Apps Script をウェブアプリとしてデプロイし、URLを取得する
- * 2. 下の ENDPOINT_URL を書き換える
- * 3. このファイルを minify してブックマークのURLに登録する
- *    （先頭に javascript: を付ける）
- * 4. Foresma Lreach の顧客一覧ページを開いてブックマークをクリック
- *
- * 【カスタマイズ】
- * Foresma Lreach の実際のHTML構造に合わせて
- * extractRecords() 内のセレクタを調整する。
- * まず STEP1: デバッグモード(DEBUG_MODE = true)で
- * コンソールに抽出結果を出力して確認する。
+ * Lreach CRM の「顧客管理」ページを開いてブックマークをクリック
  */
+javascript:(function(){
 
-(function () {
   // ============================================================
-  // ★ 設定 ★
+  // ★ GASウェブアプリのURL（デプロイ済み）★
   // ============================================================
   var ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxrAa8KzeSUafmNNIRrTCiSMm12smGTNtnhgPCAkHsNiIHy1WtGbPetj9WHZbrb9Ikj/exec';
-  var DEBUG_MODE   = false; // trueにするとデータを送信せずコンソールに表示
 
   // ============================================================
-  // メイン処理
+  // Step1: __NEXT_DATA__ からAPIデータを取得（最優先）
+  // Next.js(Vercel)アプリはここにサーバーサイドデータを持つ
+  // コンソールに "Loaded reservations: 76 ▶ Array(76)" が出ているため
+  // "reservations" キーを最優先で探す
   // ============================================================
-  var records = extractRecords();
+  function getRecordsFromNextData() {
+    try {
+      var nd = window.__NEXT_DATA__;
+      if (!nd) return null;
+      return findArraysInObject(nd.props, 'reservations', 'referrals', 'customers', 'leads', 'records');
+    } catch(e) { return null; }
+  }
+
+  function findArraysInObject(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    var keys = ['reservations', 'referrals', 'customers', 'leads', 'records'];
+    for (var i = 0; i < keys.length; i++) {
+      if (Array.isArray(obj[keys[i]]) && obj[keys[i]].length > 0) return obj[keys[i]];
+    }
+    for (var k in obj) {
+      if (typeof obj[k] === 'object' && !Array.isArray(obj[k])) {
+        var found = findArraysInObject(obj[k]);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // ============================================================
+  // Step2: ReactのFiberノードからstateを取得
+  // ============================================================
+  function getRecordsFromReact() {
+    try {
+      var root = document.querySelector('#__next');
+      if (!root) return null;
+      var fiberKey = Object.keys(root).find(function(k){
+        return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance');
+      });
+      if (!fiberKey) return null;
+      return searchFiber(root[fiberKey], 0);
+    } catch(e) { return null; }
+  }
+
+  function searchFiber(fiber, depth) {
+    if (!fiber || depth > 25) return null;
+    try {
+      var state = fiber.memoizedState;
+      while (state) {
+        var ms = state.memoizedState;
+        if (Array.isArray(ms) && ms.length > 3) {
+          var f = ms[0];
+          if (f && typeof f === 'object' && (f.name || f.id || f.email)) return ms;
+        }
+        state = state.next;
+      }
+    } catch(e) {}
+    return searchFiber(fiber.child, depth+1) || searchFiber(fiber.sibling, depth+1);
+  }
+
+  // ============================================================
+  // Step3: DOMテーブルから取得（フォールバック）
+  // 列順（実際の画面確認済み）:
+  //   名前 | ステータス | 面談日 | 開始時間 | 終了時間 | 担当者 | ヒアリングメモ
+  // ============================================================
+  function getRecordsFromDOM() {
+    var rows = document.querySelectorAll('table tbody tr');
+    if (rows.length === 0) return [];
+    var records = [];
+    rows.forEach(function(row) {
+      var cells = row.querySelectorAll('td');
+      if (cells.length < 2) return;
+      var t = function(i){ return cells[i] ? cells[i].innerText.trim().replace(/\s+/g,' ') : ''; };
+      var name = t(0);
+      if (!name) return;
+      var memo   = t(6);
+      var parsed = parseMemo(memo);
+      records.push({
+        name:         name,
+        sendDate:     normDate(t(2)),
+        ca:           t(5) === '-' ? '' : t(5),
+        timing:       parsed.timing,
+        salary:       parsed.salary,
+        hopeSalary:   parsed.hopeSalary,
+        note:         memo,
+        lreachStatus: t(1)
+      });
+    });
+    return records;
+  }
+
+  // ============================================================
+  // __NEXT_DATA__ / React Fiber の生データ → CRMフォーマット変換
+  // ============================================================
+  function normalize(rec) {
+    var memo   = rec.hearingMemo || rec.memo || rec.note || rec.comment || rec.ヒアリングメモ || '';
+    var parsed = parseMemo(memo);
+    return {
+      name:         rec.name       || rec.customerName  || rec.fullName    || '',
+      email:        rec.email      || rec.メールアドレス || '',
+      phone:        rec.phone      || rec.tel            || rec.電話番号    || '',
+      sendDate:     normDate(rec.referralDate || rec.createdAt || rec.scheduledAt || rec.interviewDate || ''),
+      ca:           rec.staffName  || rec.assignee       || rec.担当者      || '',
+      timing:       parsed.timing  || rec.transferTiming || '',
+      salary:       parsed.salary  || String(rec.currentSalary  || ''),
+      hopeSalary:   parsed.hopeSalary || String(rec.desiredSalary || ''),
+      note:         memo,
+      foresmaId:    rec.id         || rec.referralId     || ''
+    };
+  }
+
+  // ============================================================
+  // ヒアリングメモのパース
+  // 「現年収　：300万」「希望年収　：300万」「転職時期　：良いところがあればすぐに」
+  // ============================================================
+  function parseMemo(memo) {
+    var r = { salary: '', hopeSalary: '', timing: '' };
+    if (!memo) return r;
+    var s  = memo.match(/現[在職]?年収\s*[：:]\s*([\d,，万円]+)/);
+    var hs = memo.match(/希望年収\s*[：:]\s*([\d,，万円]+)/);
+    var t  = memo.match(/転職時期\s*[：:]\s*([^\n。、]+)/);
+    if (s)  r.salary     = s[1].trim();
+    if (hs) r.hopeSalary = hs[1].trim();
+    if (t)  r.timing     = t[1].trim();
+    return r;
+  }
+
+  function normDate(str) {
+    if (!str) return '';
+    var m = str.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+    if (!m) return str;
+    return m[1] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[3]).slice(-2);
+  }
+
+  // ============================================================
+  // データ取得
+  // ============================================================
+  var raw     = getRecordsFromNextData() || getRecordsFromReact();
+  var records;
+
+  if (raw && raw.length > 0) {
+    records = raw.map(normalize).filter(function(r){ return r.name; });
+  } else {
+    records = getRecordsFromDOM().filter(function(r){ return r.name; });
+  }
 
   if (records.length === 0) {
-    alert('【CRM取込】\n対象の顧客データが見つかりませんでした。\n\nForesma Lreachの顧客一覧ページを開いた状態で実行してください。');
+    alert('【CRM取込】データが取得できませんでした。\nLreach CRMの「顧客管理」ページを開いた状態で実行してください。');
     return;
   }
-
-  if (DEBUG_MODE) {
-    console.log('【CRM取込デバッグ】抽出データ:', records);
-    alert('【CRM取込 デバッグモード】\n' + records.length + '件のデータを抽出しました。\nコンソール(F12)で内容を確認してください。');
-    return;
-  }
-
-  var ok = confirm('【CRM取込】\n' + records.length + '件の顧客データをCRMに取り込みます。\nよろしいですか？');
-  if (!ok) return;
 
   // ============================================================
-  // GAS エンドポイントに送信
+  // 確認ダイアログ
+  // ============================================================
+  var preview = records.slice(0, 5).map(function(r){ return '・' + r.name; }).join('\n');
+  if (records.length > 5) preview += '\n  ほか ' + (records.length - 5) + '件';
+
+  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nスプレッドシートに送信しますか？')) return;
+
+  // ============================================================
+  // GASエンドポイントに送信
   // ============================================================
   fetch(ENDPOINT_URL, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ records: records })
   })
-  .then(function(res) { return res.json(); })
-  .then(function(data) {
+  .then(function(res){ return res.json(); })
+  .then(function(data){
     if (data.status === 'ok') {
-      alert('【CRM取込 完了】\n✅ ' + data.added   + '件 追加\n⏭ ' + data.skipped + '件 スキップ（重複）\n\nスプレッドシートの「Foresma取込」シートを確認してください。');
+      alert('【CRM取込 完了】\n✅ ' + data.added + '件 追加\n⏭ ' + data.skipped + '件 スキップ（重複）\n\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
     } else {
       alert('【CRM取込 エラー】\n' + data.message);
     }
   })
-  .catch(function(err) {
-    alert('【CRM取込 通信エラー】\n' + err.message + '\n\nエンドポイントURLを確認してください。');
+  .catch(function(err){
+    alert('【CRM取込 通信エラー】\n' + err.message);
   });
-
-  // ============================================================
-  // Foresma Lreach 管理画面からデータを抽出
-  // ------------------------------------------------------------
-  // ★ここを実際の管理画面のHTML構造に合わせて修正する★
-  //
-  // 確認方法:
-  //   1. Foresma Lreach の顧客一覧を開く
-  //   2. F12 → コンソールで以下を実行してテーブル構造を確認:
-  //      document.querySelectorAll('table tr').length
-  //      document.querySelectorAll('table tr')[1].innerText
-  // ============================================================
-  function extractRecords() {
-    var records = [];
-
-    // ---- パターンA: HTMLテーブル形式 ----
-    // 一覧が <table> で作られている場合
-    var rows = document.querySelectorAll('table tbody tr');
-    if (rows.length > 0) {
-      rows.forEach(function(row) {
-        var rec = extractFromTableRow(row);
-        if (rec) records.push(rec);
-      });
-      return records;
-    }
-
-    // ---- パターンB: カード/リスト形式 ----
-    // 一覧が divカードで作られている場合
-    var cards = document.querySelectorAll('.customer-card, .lead-card, .contact-card, [data-customer]');
-    if (cards.length > 0) {
-      cards.forEach(function(card) {
-        var rec = extractFromCard(card);
-        if (rec) records.push(rec);
-      });
-      return records;
-    }
-
-    return records;
-  }
-
-  // ---- テーブル行から抽出 ----
-  // ★列の順番は実際の画面に合わせて変更する★
-  function extractFromTableRow(row) {
-    var cells = row.querySelectorAll('td');
-    if (cells.length < 3) return null;
-
-    var text = function(idx) {
-      return cells[idx] ? cells[idx].innerText.trim() : '';
-    };
-
-    // Lreach管理画面の列順（実際の画面を確認して修正）:
-    // 例: 送客日 | 氏名 | メールアドレス | 電話番号 | ステータス | ...
-    return {
-      sendDate:  text(0),  // 送客日
-      name:      text(1),  // 氏名
-      email:     text(2),  // メールアドレス
-      phone:     text(3),  // 電話番号
-      age:       text(4),  // 年齢
-      area:      text(5),  // 居住地
-      job:       text(6),  // 現職職種
-      timing:    text(7),  // 転職希望時期
-      note:      text(8),  // コメント/備考
-      foresmaId: row.dataset.id || row.dataset.customerId || ''
-    };
-  }
-
-  // ---- カード形式から抽出 ----
-  // ★セレクタは実際の画面に合わせて変更する★
-  function extractFromCard(card) {
-    var get = function(selector) {
-      var el = card.querySelector(selector);
-      return el ? el.innerText.trim() : '';
-    };
-
-    return {
-      name:      get('.name, [data-name], .customer-name'),
-      email:     get('.email, [data-email], .customer-email'),
-      phone:     get('.phone, [data-phone], .customer-phone, .tel'),
-      area:      get('.area, .prefecture, .address'),
-      job:       get('.job, .occupation, .current-job'),
-      note:      get('.note, .comment, .memo'),
-      foresmaId: card.dataset.id || card.dataset.customerId || '',
-      sendDate:  get('.date, .created-at, .send-date')
-    };
-  }
 
 })();
