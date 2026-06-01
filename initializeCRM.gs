@@ -449,9 +449,7 @@ function writeLog_(type, target, content, status, detail) {
 // ============================================================
 // スタブ関数（後続ステップで実装）
 // ============================================================
-function importForesmaData() {
-  SpreadsheetApp.getUi().alert('未実装', 'Foresmaデータ取込機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
-}
+// importForesmaData() は foresmaImport.gs で実装
 
 function importTimeRexData() {
   SpreadsheetApp.getUi().alert('未実装', 'TimeRexデータ取込機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
