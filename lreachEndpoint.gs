@@ -148,6 +148,66 @@ function buildForesmaImportIndex_(sheet) {
 }
 
 // ============================================================
+// Lreach: クリップボードから取込（メニュー用）
+// ブックマークレットがクリップボードにコピーしたJSONを
+// スプレッドシートのダイアログから貼り付けて処理する
+// ============================================================
+function importLreachFromClipboard() {
+  var html = HtmlService.createHtmlOutput(
+    '<style>body{font-family:sans-serif;padding:16px;margin:0}' +
+    'textarea{width:100%;height:180px;font-size:12px;box-sizing:border-box;border:1px solid #ccc;padding:8px;border-radius:4px}' +
+    'button{margin-top:12px;padding:10px 24px;background:#1a73e8;color:#fff;border:none;border-radius:4px;font-size:14px;cursor:pointer}' +
+    '#msg{margin-top:10px;font-weight:bold}</style>' +
+    '<p style="margin:0 0 8px;font-size:14px">ブックマークレット実行後にコピーされたJSONをここに貼り付けてください：</p>' +
+    '<textarea id="json" placeholder="Ctrl+V で貼り付け"></textarea>' +
+    '<br><button onclick="doImport()">取込</button>' +
+    '<div id="msg"></div>' +
+    '<script>' +
+    'function doImport(){' +
+    'var v=document.getElementById("json").value.trim();' +
+    'if(!v){document.getElementById("msg").innerText="データが空です";return;}' +
+    'document.getElementById("msg").innerText="処理中...";' +
+    'google.script.run' +
+    '.withSuccessHandler(function(r){document.getElementById("msg").innerHTML="<span style=\'color:green\'>✅ "+r+"</span>";})' +
+    '.withFailureHandler(function(e){document.getElementById("msg").innerHTML="<span style=\'color:red\'>❌ "+e.message+"</span>";})' +
+    '.processLreachJson(v);' +
+    '}' +
+    '</script>'
+  ).setWidth(520).setHeight(340);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Lreach: クリップボードから取込');
+}
+
+function processLreachJson(jsonStr) {
+  var payload = JSON.parse(jsonStr);
+  var records = payload.records;
+  if (!records || !Array.isArray(records) || records.length === 0) throw new Error('recordsが空です');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NAMES.FORESMA);
+  if (!sheet) throw new Error('Foresma取込シートが見つかりません');
+
+  var added   = 0;
+  var skipped = 0;
+  var now     = new Date();
+  var existingKeys = buildForesmaImportIndex_(sheet);
+
+  records.forEach(function(rec) {
+    var email = String(rec.email || '').trim().toLowerCase();
+    var phone = normalizePhone_(String(rec.phone || '').trim());
+    var name  = String(rec.name  || '').trim();
+    var key   = email || phone || name;
+    if (!key) { skipped++; return; }
+    if (existingKeys[key]) { skipped++; return; }
+    sheet.appendRow(buildForesmaRowFromBookmarklet_(rec, now));
+    existingKeys[key] = true;
+    added++;
+  });
+
+  appendLog_(ss, 'Lreach取込', 'クリップボード', added + '件追加、' + skipped + '件スキップ', '成功', '');
+  return added + '件追加、' + skipped + '件スキップ（重複）しました。';
+}
+
+// ============================================================
 // JSONレスポンス生成
 // ============================================================
 function jsonResponse_(obj) {

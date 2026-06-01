@@ -12,6 +12,7 @@ function onOpen() {
     .addItem('CRMを初期化', 'initializeCRM')
     .addSeparator()
     .addItem('Foresmaデータを取り込む（手動貼付け）', 'importForesmaData')
+    .addItem('Lreach: クリップボードから取込', 'importLreachFromClipboard')
     .addItem('Lreach取込シートから顧客マスタに反映', 'importForesmaData')
     .addItem('TimeRex: Gmailから自動取込', 'importTimeRexFromGmail')
     .addItem('TimeRex: 取込シートから反映', 'importTimeRexData')

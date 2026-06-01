@@ -213,41 +213,40 @@ javascript:(function(){
   var preview = records.slice(0, 5).map(function(r){ return '・' + r.name; }).join('\n');
   if (records.length > 5) preview += '\n  ほか ' + (records.length - 5) + '件';
 
-  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nスプレッドシートに送信しますか？')) return;
+  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nクリップボードにコピーしますか？')) return;
 
   // ============================================================
-  // GASエンドポイントに送信
+  // クリップボードにコピー（ネットワーク通信を使わない確実な方法）
+  // コピー後、スプレッドシートで「CRM操作→Lreach: クリップボードから取込」を実行する
   // ============================================================
-  // LreachのCSPがform-actionをブロックするため、about:blankの新ウィンドウ経由で送信する。
-  // about:blankはLreachのCSPを継承しないため制約なしに送信できる。
-  var payloadJson = JSON.stringify({ records: records });
+  var jsonStr = JSON.stringify({ records: records });
 
-  var w = window.open('about:blank', '_blank');
-  if (!w) {
-    alert('ポップアップがブロックされました。\nアドレスバー右端のポップアップブロックアイコンをクリックして許可してください。');
-    return;
+  function copyDone() {
+    alert('【CRM取込 準備完了】\n✅ ' + records.length + '件をクリップボードにコピーしました。\n\n次の手順:\n1. スプレッドシートを開く\n2. メニュー「CRM操作」→「Lreach: クリップボードから取込」\n3. テキストエリアに Ctrl+V で貼り付け\n4. 「取込」ボタンをクリック');
   }
 
-  w.document.write(
-    '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:30px">' +
-    '<p style="font-size:18px">&#128228; CRMに送信中... (' + records.length + '件)</p>' +
-    '<p style="color:#666">このウィンドウは自動的に閉じます。</p>' +
-    '<form id="f" method="POST" action="' + ENDPOINT_URL + '">' +
-    '<input type="hidden" name="payload" id="p">' +
-    '</form>' +
-    '<scr' + 'ipt>' +
-    'document.getElementById("p").value=' + JSON.stringify(payloadJson) + ';' +
-    'document.getElementById("f").submit();' +
-    'setTimeout(function(){' +
-    'document.body.innerHTML="<p style=\'font-size:20px;color:green\'>&#10003; 送信完了！このタブを閉じてください。</p>";' +
-    '},2000);' +
-    '</scr' + 'ipt>' +
-    '</body></html>'
-  );
-  w.document.close();
-
-  setTimeout(function() {
-    alert('【CRM取込 送信完了】\n✅ ' + records.length + '件を送信しました。\n\nForesma取込シートを確認してください。\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
-  }, 3000);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(jsonStr).then(copyDone).catch(function() {
+      var ta = document.createElement('textarea');
+      ta.value = jsonStr;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      copyDone();
+    });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = jsonStr;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    copyDone();
+  }
 
 })();
