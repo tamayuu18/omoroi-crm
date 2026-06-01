@@ -19,6 +19,8 @@ function onOpen() {
     .addItem('タスクを更新する', 'createAutoTasks')
     .addItem('アラートを確認する', 'checkAlerts')
     .addItem('ダッシュボードを更新する', 'updateDashboard')
+    .addSeparator()
+    .addItem('TimeRex: メール解析を確認（デバッグ）', 'debugTimeRexEmail')
     .addToUi();
 }
 
