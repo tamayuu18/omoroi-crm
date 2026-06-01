@@ -24,6 +24,7 @@ function onOpen() {
     .addItem('アラートを確認する', 'checkAlerts')
     .addItem('ダッシュボードを更新する', 'updateDashboard')
     .addSeparator()
+    .addItem('🔧 ステータス変更トリガーを設定する', 'setupStatusTrigger')
     .addItem('TimeRex: Step1 送信元アドレスを確認', 'debugCheckGmailSender')
     .addItem('TimeRex: Step2 メール解析テスト', 'debugTimeRexEmail')
     .addToUi();
