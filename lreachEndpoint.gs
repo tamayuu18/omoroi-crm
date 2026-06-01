@@ -316,30 +316,29 @@ function findCol_(header, candidates) {
 function parseLreachMemo_(memo) {
   var r = { kana:'', phone:'', email:'', age:'', gender:'', salary:'', hopeSalary:'', timing:'' };
   if (!memo) return r;
-  function mf(patterns) {
-    for (var i = 0; i < patterns.length; i++) {
-      var m = memo.match(new RegExp(patterns[i] + '[\\s　]*[：:][ \t]*(\\S[^\n]*)'));
-      if (m) return m[1].trim();
-    }
-    return '';
+  // フリガナ: ひらがな・カタカナのみ抽出
+  var kanaM = memo.match(/(?:ふりがな|フリガナ)[\s　]*[：:]\s*([぀-ヿ゠ー\s　]+?)(?=\s*\S+[：:]|\s*$)/);
+  if (kanaM) r.kana = kanaM[1].trim();
+  // 電話番号: 数字とハイフンのみ
+  var phoneM = memo.match(/電話番号[\s　]*[：:]\s*(\d[\d\-\s]{8,14})/);
+  if (phoneM) r.phone = phoneM[1].trim();
+  // メールアドレス: メールアドレス形式
+  var emailM = memo.match(/(?:メールアドレス|アドレス)[\s　]*[：:]\s*([\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,})/);
+  if (emailM) r.email = emailM[1].trim();
+  // 性別: 男性/女性/男/女
+  var genderM = memo.match(/性別[\s　]*[：:]\s*(男性?|女性?)/);
+  if (genderM) r.gender = genderM[1].trim();
+  // 生年月日 → 年齢計算
+  var birthM = memo.match(/生年月日[\s　]*[：:]\s*(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
+  if (birthM) {
+    var today = new Date();
+    var age = today.getFullYear() - parseInt(birthM[1]);
+    if (today.getMonth()+1 < parseInt(birthM[2]) || (today.getMonth()+1 === parseInt(birthM[2]) && today.getDate() < parseInt(birthM[3]))) age--;
+    r.age = String(age);
   }
-  r.kana   = mf(['ふりがな', 'フリガナ']);
-  r.phone  = mf(['電話番号']);
-  r.email  = mf(['メールアドレス']);
-  r.gender = mf(['性別']);
-  var birth = mf(['生年月日']);
-  if (birth) {
-    var bm = birth.match(/(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
-    if (bm) {
-      var today = new Date();
-      var age = today.getFullYear() - parseInt(bm[1]);
-      if (today.getMonth()+1 < parseInt(bm[2]) || (today.getMonth()+1 === parseInt(bm[2]) && today.getDate() < parseInt(bm[3]))) age--;
-      r.age = String(age);
-    }
-  }
-  var s  = memo.match(/現[在職]?年収[\s　]*[：:][\s　]*([\d,，万円]+)/);
-  var hs = memo.match(/希望年収[\s　]*[：:][\s　]*([\d,，万円]+)/);
-  var t  = memo.match(/転職時期[\s　]*[：:][\s　]*([^\n。、]+)/);
+  var s  = memo.match(/現[在職]?年収[\s　]*[：:]\s*([\d,，万円]+)/);
+  var hs = memo.match(/希望年収[\s　]*[：:]\s*([\d,，万円]+)/);
+  var t  = memo.match(/転職時期[\s　]*[：:]\s*([^\n。、　]{1,30})/);
   if (s)  r.salary     = s[1].trim();
   if (hs) r.hopeSalary = hs[1].trim();
   if (t)  r.timing     = t[1].trim();
