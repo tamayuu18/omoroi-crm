@@ -478,5 +478,58 @@ function writeLog_(type, target, content, status, detail) {
 // importTimeRexData() / importTimeRexFromGmail() は timerexImport.gs で実装
 
 function createAutoTasks() {
-  SpreadsheetApp.getUi().alert('未実装', 'タスク自動生成機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
+  var ss        = SpreadsheetApp.getActiveSpreadsheet();
+  var ui        = SpreadsheetApp.getUi();
+  var custSheet = ss.getSheetByName(SHEET_NAMES.CUSTOMER);
+  var taskSheet = ss.getSheetByName(SHEET_NAMES.TASK);
+  if (!custSheet || !taskSheet) {
+    ui.alert('エラー', '必要なシートが見つかりません。', ui.ButtonSet.OK);
+    return;
+  }
+
+  var lastRow = custSheet.getLastRow();
+  if (lastRow < 2) { ui.alert('タスク更新', '顧客マスタにデータがありません。', ui.ButtonSet.OK); return; }
+
+  var now     = new Date();
+  var added   = 0;
+
+  // タスク管理の既存タスクを「顧客ID+タスク内容」でインデックス化（重複防止）
+  var existingTasks = {};
+  if (taskSheet.getLastRow() >= 2) {
+    taskSheet.getRange(2, 1, taskSheet.getLastRow() - 1,
+      Math.max(TASK_COL.CUST_ID, TASK_COL.CONTENT, TASK_COL.STATUS) + 1
+    ).getValues().forEach(function(r) {
+      var cid     = String(r[TASK_COL.CUST_ID] || '').trim();
+      var content = String(r[TASK_COL.CONTENT]  || '').trim();
+      var status  = String(r[TASK_COL.STATUS]   || '').trim();
+      if (cid && content && status !== '完了') existingTasks[cid + '|' + content] = true;
+    });
+  }
+
+  var custData = custSheet.getRange(2, 1, lastRow - 1, 26).getValues();
+  custData.forEach(function(row) {
+    var custId = String(row[CUSTOMER_COL.ID]     || '').trim();
+    var name   = String(row[CUSTOMER_COL.NAME]   || '').trim();
+    var ca     = String(row[CUSTOMER_COL.CA]     || '').trim();
+    var status = String(row[CUSTOMER_COL.STATUS] || '').trim();
+    if (!custId || !status) return;
+
+    var taskDef = STATUS_TASK_MAP[status];
+    if (!taskDef) return;
+
+    var key = custId + '|' + taskDef.content;
+    if (existingTasks[key]) return;  // 同内容の未完了タスクがあればスキップ
+
+    var deadline = new Date(now);
+    deadline.setDate(deadline.getDate() + taskDef.daysOffset);
+
+    var taskId  = generateTaskId_(taskSheet);
+    taskSheet.appendRow(buildTaskRow_(taskId, custId, name, ca,
+      taskDef.content, deadline, '未対応', taskDef.priority, status));
+    existingTasks[key] = true;
+    added++;
+  });
+
+  appendLog_(ss, 'タスク更新', 'createAutoTasks', added + '件のタスクを追加', '成功', '');
+  ui.alert('タスク更新完了', added + '件のタスクを追加しました。', ui.ButtonSet.OK);
 }
