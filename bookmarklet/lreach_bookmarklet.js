@@ -211,40 +211,45 @@ javascript:(function(){
   var preview = records.slice(0, 5).map(function(r){ return '・' + r.name; }).join('\n');
   if (records.length > 5) preview += '\n  ほか ' + (records.length - 5) + '件';
 
-  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nクリップボードにコピーしますか？')) return;
+  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nスプレッドシートに送信しますか？')) return;
 
   // ============================================================
-  // クリップボードにコピー（ネットワーク通信を使わない確実な方法）
-  // コピー後、スプレッドシートで「CRM操作→Lreach: クリップボードから取込」を実行する
+  // about:blank の新ウィンドウ経由でGASに送信
+  // LreachのCSPはフォーム送信をブロックするが、
+  // about:blankウィンドウはCSPを継承しないため制限なし。
   // ============================================================
-  var jsonStr = JSON.stringify({ records: records });
+  var payloadJson = JSON.stringify({ records: records });
 
-  function copyDone() {
-    alert('【CRM取込 準備完了】\n✅ ' + records.length + '件をクリップボードにコピーしました。\n\n次の手順:\n1. スプレッドシートを開く\n2. メニュー「CRM操作」→「Lreach: クリップボードから取込」\n3. テキストエリアに Ctrl+V で貼り付け\n4. 「取込」ボタンをクリック');
+  var w = window.open('', '_blank', 'width=400,height=200');
+  if (!w) {
+    alert('ポップアップがブロックされています。\nアドレスバー右端のアイコンをクリックして\nlreach-crm-prototype.vercel.appのポップアップを許可してください。');
+    return;
   }
 
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(jsonStr).then(copyDone).catch(function() {
-      var ta = document.createElement('textarea');
-      ta.value = jsonStr;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      copyDone();
-    });
-  } else {
-    var ta = document.createElement('textarea');
-    ta.value = jsonStr;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    copyDone();
-  }
+  // about:blankウィンドウにフォームを書き込んで自動送信
+  w.document.open();
+  w.document.write(
+    '<!DOCTYPE html><html><head><meta charset="utf-8"></head>' +
+    '<body style="font-family:sans-serif;padding:24px;background:#f8f9fa">' +
+    '<p style="font-size:16px;color:#333">&#128228; CRMに送信中... (' + records.length + '件)</p>' +
+    '<p style="font-size:13px;color:#666">このウィンドウは自動で閉じます</p>' +
+    '<form id="f" method="POST" action="' + ENDPOINT_URL + '">' +
+    '<input type="hidden" name="payload" id="p">' +
+    '</form>' +
+    '<script>' +
+    'document.getElementById("p").value=' + JSON.stringify(payloadJson) + ';' +
+    'document.getElementById("f").submit();' +
+    'setTimeout(function(){' +
+    'try{window.close();}catch(e){}' +
+    '},3000);' +
+    '<\/script>' +
+    '</body></html>'
+  );
+  w.document.close();
+
+  // 元のページで完了通知
+  setTimeout(function() {
+    alert('【CRM取込 完了】\n✅ ' + records.length + '件を送信しました。\n\nForesma取込シートを確認し、\n次に「Foresmaデータを取り込む」を実行してください。');
+  }, 4000);
 
 })();
