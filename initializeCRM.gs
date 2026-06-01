@@ -477,18 +477,6 @@ function writeLog_(type, target, content, status, detail) {
 
 // importTimeRexData() / importTimeRexFromGmail() は timerexImport.gs で実装
 
-function syncCustomerStatus() {
-  SpreadsheetApp.getUi().alert('未実装', 'ステータス同期機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
 function createAutoTasks() {
   SpreadsheetApp.getUi().alert('未実装', 'タスク自動生成機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-function checkAlerts() {
-  SpreadsheetApp.getUi().alert('未実装', 'アラート確認機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-function updateDashboard() {
-  SpreadsheetApp.getUi().alert('未実装', 'ダッシュボード更新機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
 }

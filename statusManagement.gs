@@ -238,3 +238,125 @@ function setupStatusTrigger() {
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
+
+// ============================================================
+// ステータス同期
+// 面談管理・選考管理の状況をもとに顧客マスタのステータスを更新
+// ============================================================
+function syncCustomerStatus() {
+  var ss  = SpreadsheetApp.getActiveSpreadsheet();
+  var ui  = SpreadsheetApp.getUi();
+
+  var customerSheet  = ss.getSheetByName(SHEET_NAMES.CUSTOMER);
+  var meetingSheet   = ss.getSheetByName(SHEET_NAMES.MEETING);
+  var selectionSheet = ss.getSheetByName(SHEET_NAMES.SELECTION);
+
+  if (!customerSheet) {
+    ui.alert('エラー', '顧客マスタシートが見つかりません。', ui.ButtonSet.OK);
+    return;
+  }
+
+  var updated = 0;
+  var now = new Date();
+
+  // 顧客マスタを顧客IDでインデックス化
+  var custLastRow = customerSheet.getLastRow();
+  if (custLastRow < 2) {
+    ui.alert('ステータス同期', '顧客マスタにデータがありません。', ui.ButtonSet.OK);
+    return;
+  }
+
+  var custData = customerSheet.getRange(2, 1, custLastRow - 1,
+    Math.max(CUSTOMER_COL.STATUS, CUSTOMER_COL.CA) + 1).getValues();
+
+  // 顧客ID → { rowIndex, currentStatus, ca }
+  var custIndex = {};
+  custData.forEach(function(row, i) {
+    var id = String(row[CUSTOMER_COL.ID] || '').trim();
+    if (id) custIndex[id] = {
+      rowIndex: i + 2,  // 実際のシート行番号
+      status:   String(row[CUSTOMER_COL.STATUS] || '').trim(),
+      ca:       String(row[CUSTOMER_COL.CA]     || '').trim()
+    };
+  });
+
+  // --- 面談管理から同期 ---
+  // 面談ステータスが「実施済」→ 顧客ステータスを「面談実施済み」に
+  // 面談ステータスが「キャンセル」/「無断キャンセル」→「面談キャンセル」に
+  if (meetingSheet && meetingSheet.getLastRow() >= 2) {
+    var mtgCols = MEETING_COL.STATUS + 1;
+    var mtgData = meetingSheet.getRange(2, 1, meetingSheet.getLastRow() - 1, mtgCols).getValues();
+
+    mtgData.forEach(function(row) {
+      var custId    = String(row[MEETING_COL.CUST_ID] || '').trim();
+      var mtgStatus = String(row[MEETING_COL.STATUS]  || '').trim();
+      var mtgDate   = row[MEETING_COL.MTG_DATE];
+
+      if (!custId || !custIndex[custId]) return;
+
+      var cust = custIndex[custId];
+      var newStatus = null;
+
+      if (mtgStatus === '実施済') {
+        newStatus = '面談実施済み';
+      } else if (mtgStatus === 'キャンセル' || mtgStatus === '無断キャンセル') {
+        newStatus = '面談キャンセル';
+      } else if (mtgStatus === 'リスケ') {
+        newStatus = 'リスケ調整中';
+      } else if (mtgStatus === '予約済' && mtgDate instanceof Date && mtgDate > now) {
+        newStatus = '面談予約済み';
+      }
+
+      if (newStatus && cust.status !== newStatus) {
+        customerSheet.getRange(cust.rowIndex, CUSTOMER_COL.STATUS + 1).setValue(newStatus);
+        customerSheet.getRange(cust.rowIndex, CUSTOMER_COL.UPDATED_AT + 1).setValue(now);
+        cust.status = newStatus;
+        updated++;
+      }
+    });
+  }
+
+  // --- 選考管理から同期 ---
+  // 選考ステータス → 顧客ステータスのマッピング
+  var selectionStatusMap = {
+    '書類選考中':     '書類選考中',
+    '一次面接予定':   '一次面接予定',
+    '一次結果待ち':   '一次面接結果待ち',
+    '最終面接予定':   '最終面接予定',
+    '内定':           '内定',
+    '承諾':           '承諾',
+    '辞退':           '辞退',
+    'お見送り':       '失注'
+  };
+
+  if (selectionSheet && selectionSheet.getLastRow() >= 2) {
+    // 選考ID(0), 顧客ID(1), 氏名(2), 企業名(3), 求人名(4), 応募日(5),
+    // 選考ステータス(6), ...
+    var selData = selectionSheet.getRange(2, 1, selectionSheet.getLastRow() - 1, 7).getValues();
+
+    selData.forEach(function(row) {
+      var custId    = String(row[1] || '').trim();
+      var selStatus = String(row[6] || '').trim();
+      if (!custId || !custIndex[custId]) return;
+
+      var newStatus = selectionStatusMap[selStatus];
+      if (!newStatus) return;
+
+      var cust = custIndex[custId];
+      if (cust.status !== newStatus) {
+        customerSheet.getRange(cust.rowIndex, CUSTOMER_COL.STATUS + 1).setValue(newStatus);
+        customerSheet.getRange(cust.rowIndex, CUSTOMER_COL.UPDATED_AT + 1).setValue(now);
+        cust.status = newStatus;
+        updated++;
+      }
+    });
+  }
+
+  appendLog_(ss, 'ステータス同期', 'syncCustomerStatus',
+    updated + '件の顧客ステータスを更新しました', '成功', '');
+
+  ui.alert('ステータス同期完了',
+    updated + '件の顧客ステータスを更新しました。\n\n' +
+    '面談管理・選考管理の状況を顧客マスタに反映しました。',
+    ui.ButtonSet.OK);
+}
