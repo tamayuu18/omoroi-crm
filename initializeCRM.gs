@@ -12,7 +12,8 @@ function onOpen() {
     .addItem('CRMを初期化', 'initializeCRM')
     .addSeparator()
     .addItem('Foresmaデータを取り込む', 'importForesmaData')
-    .addItem('TimeRexデータを取り込む', 'importTimeRexData')
+    .addItem('TimeRex: Gmailから自動取込', 'importTimeRexFromGmail')
+    .addItem('TimeRex: 取込シートから反映', 'importTimeRexData')
     .addSeparator()
     .addItem('ステータスを同期する', 'syncCustomerStatus')
     .addItem('タスクを更新する', 'createAutoTasks')
@@ -183,7 +184,14 @@ function initializeCRM() {
     errors.push('ダッシュボード構築失敗: ' + e.message);
   }
 
-  // --- Step 5: シート順序を整理 ---
+  // --- Step 5: TimeRex設定欄を設定シートに追加 ---
+  try {
+    setupTimeRexSettings();
+  } catch (e) {
+    // 未実装環境では無視
+  }
+
+  // --- Step 6: シート順序を整理 ---
   try {
     reorderSheets_(ss, sheetOrder);
   } catch (e) {
@@ -191,7 +199,7 @@ function initializeCRM() {
     errors.push('シート並び替え失敗: ' + e.message);
   }
 
-  // --- Step 6: ログに記録 ---
+  // --- Step 7: ログに記録 ---
   try {
     appendLog_(ss, '初期化完了', 'initializeCRM', 'CRM初期化処理が完了しました', '成功', errors.join(' / '));
   } catch (e) {
@@ -449,11 +457,11 @@ function writeLog_(type, target, content, status, detail) {
 // ============================================================
 // スタブ関数（後続ステップで実装）
 // ============================================================
-// importForesmaData() は foresmaImport.gs で実装
+// importForesmaData()     は foresmaImport.gs で実装
+// importTimeRexFromGmail() は timerexImport.gs で実装
+// importTimeRexData()      は timerexImport.gs で実装
 
-function importTimeRexData() {
-  SpreadsheetApp.getUi().alert('未実装', 'TimeRexデータ取込機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
-}
+// importTimeRexData() / importTimeRexFromGmail() は timerexImport.gs で実装
 
 function syncCustomerStatus() {
   SpreadsheetApp.getUi().alert('未実装', 'ステータス同期機能は実装予定です。', SpreadsheetApp.getUi().ButtonSet.OK);
