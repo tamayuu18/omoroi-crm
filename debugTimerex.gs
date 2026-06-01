@@ -6,99 +6,173 @@
 // 解析結果をダイアログとログシートに出力する。
 // ============================================================
 
-function debugTimeRexEmail() {
-  var ss  = SpreadsheetApp.getActiveSpreadsheet();
-  var ui  = SpreadsheetApp.getUi();
-  var config = loadTimeRexConfig_(ss);
+// ============================================================
+// ステップ1: Gmailに届いているTimeRexメールの送信元を確認
+// まずこれを実行して「CRM_DEBUG」シートを確認する
+// ============================================================
+function debugCheckGmailSender() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
 
-  // ---- 1. メールを1件取得 ----
-  // 送信元が設定されていない場合は全受信トレイから最新を探す
-  var query = config.senderEmail ? 'from:' + config.senderEmail : '';
-  var threads = GmailApp.search(query || 'in:anywhere', 0, 20);
+  // フィルタなしで受信トレイ全体から最新20件を取得
+  var threads = GmailApp.search('in:anywhere', 0, 20);
+  var rows = [['#', '日時', '送信元(From)', '件名', 'TimeRex判定']];
 
-  if (threads.length === 0) {
-    ui.alert('デバッグ', '対象メールが見つかりませんでした。\n送信元アドレスの設定を確認してください。', ui.ButtonSet.OK);
-    return;
-  }
-
-  // ---- 2. メール候補を一覧表示して選択させる ----
-  var candidates = [];
+  var count = 0;
   threads.forEach(function(t) {
     t.getMessages().forEach(function(m) {
-      candidates.push({
-        subject: m.getSubject(),
-        from:    m.getFrom(),
-        date:    m.getDate(),
-        message: m
-      });
+      if (count >= 20) return;
+      var subject = m.getSubject();
+      var from    = m.getFrom();
+      var isTimerex = /さんが新しい予定を追加|さんが予定を追加|timerex/i.test(subject) ||
+                      /TimeRexから.+さんが/i.test(m.getPlainBody().slice(0, 200));
+      rows.push([
+        ++count,
+        Utilities.formatDate(m.getDate(), Session.getScriptTimeZone(), 'MM/dd HH:mm'),
+        from,
+        subject,
+        isTimerex ? '✅ 該当' : '—'
+      ]);
     });
   });
 
+  var sheet = getOrCreateDebugSheet_(ss);
+  sheet.clearContents();
+  sheet.getRange(1, 1, rows.length, 5).setValues(rows);
+  sheet.getRange(1, 1, 1, 5).setBackground('#1a73e8').setFontColor('#ffffff').setFontWeight('bold');
+  sheet.autoResizeColumns(1, 5);
+
+  ui.alert(
+    'Step1: Gmail送信元確認',
+    '「CRM_DEBUG」シートに最新20件のメール一覧を出力しました。\n\n' +
+    '「TimeRex判定」列が ✅ の行の「送信元(From)」をコピーして、\n' +
+    '設定シートの「TimeRex送信元メールアドレス」に貼り付けてください。\n\n' +
+    '確認後、次は「Step2: メール解析テスト」を実行してください。',
+    ui.ButtonSet.OK
+  );
+}
+
+// ============================================================
+// ステップ2: 送信元を無視してTimeRexメールの解析内容を確認
+// ============================================================
+function debugTimeRexEmail() {
+  var ss     = SpreadsheetApp.getActiveSpreadsheet();
+  var ui     = SpreadsheetApp.getUi();
+  var config = loadTimeRexConfig_(ss);
+
+  // 送信元フィルタなしで「さんが新しい予定を追加」の件名で検索
+  var threads = GmailApp.search('subject:新しい予定を追加 OR subject:予定を追加 OR subject:timerex', 0, 10);
+
+  // 見つからなければ全メールから候補を探す
+  if (threads.length === 0) {
+    threads = GmailApp.search('in:anywhere', 0, 30);
+  }
+
+  var candidates = [];
+  threads.forEach(function(t) {
+    t.getMessages().forEach(function(m) {
+      candidates.push(m);
+    });
+  });
+
+  if (candidates.length === 0) {
+    ui.alert('デバッグ', 'メールが1件も見つかりませんでした。', ui.ButtonSet.OK);
+    return;
+  }
+
   // 最新5件を候補として表示
-  var preview = candidates.slice(0, 5).map(function(c, i) {
-    return (i + 1) + '. [' + Utilities.formatDate(c.date, Session.getScriptTimeZone(), 'MM/dd HH:mm') + '] ' + c.subject;
+  var preview = candidates.slice(0, 5).map(function(m, i) {
+    return (i + 1) + '. [' + Utilities.formatDate(m.getDate(), Session.getScriptTimeZone(), 'MM/dd') + '] ' + m.getSubject().slice(0, 40);
   }).join('\n');
 
   var choice = ui.prompt(
-    'デバッグ: メールを選択',
-    '以下のメールが見つかりました。\n番号を入力してください（Enter で1番を使用）:\n\n' + preview,
+    'Step2: 解析するメールを選択',
+    '番号を入力してください（未入力→1番）:\n\n' + preview,
     ui.ButtonSet.OK_CANCEL
   );
-
   if (choice.getSelectedButton() === ui.Button.CANCEL) return;
 
   var idx = parseInt(choice.getResponseText().trim()) - 1;
   if (isNaN(idx) || idx < 0 || idx >= candidates.length) idx = 0;
 
-  var message = candidates[idx].message;
+  var message = candidates[idx];
   var subject = message.getSubject();
   var from    = message.getFrom();
   var body    = message.getPlainBody();
 
-  // ---- 3. 解析を試みる ----
+  // 送信元チェックをスキップして強制解析
+  var configNoFilter = JSON.parse(JSON.stringify(config));
+  configNoFilter.senderEmail = ''; // 送信元フィルタを一時的に無効化
+
   var parsed = null;
-  var parseError = '';
-  try {
-    parsed = parseTimeRexEmail_(message, config);
-  } catch (e) {
-    parseError = e.message;
-  }
+  var steps  = [];
 
-  // ---- 4. ログシートに生データを記録 ----
-  var logSheet = ss.getSheetByName(SHEET_NAMES.LOG);
-  if (logSheet) {
-    logSheet.appendRow([new Date(), 'DEBUG', subject, '--- メール本文 ---\n' + body.slice(0, 2000), '調査中', 'from: ' + from]);
-  }
+  // --- 判定ステップをひとつずつ確認 ---
+  var step1 = /さんが新しい予定を追加|さんが予定を追加|timerex/i.test(subject) ||
+              /TimeRexから.+さんが/i.test(body.slice(0, 300));
+  steps.push('TimeRex判定: ' + (step1 ? '✅ 通過' : '❌ 失敗 → 件名が「さんが新しい予定を追加」を含まない'));
 
-  // ---- 5. デバッグシートに生データと解析結果を書き出す ----
-  writeDebugSheet_(ss, subject, from, body, parsed, parseError);
+  var nameMatch = subject.match(/^(.+?)さんが新しい予定|^(.+?)さんが予定/);
+  var name = nameMatch ? (nameMatch[1] || nameMatch[2] || '').trim() : '';
+  steps.push('氏名(件名から): ' + (name || '❌ 未取得'));
 
-  // ---- 6. サマリーをダイアログ表示 ----
-  var summary = '【解析対象メール】\n' +
-    '件名: ' + subject + '\n' +
-    'From: ' + from + '\n\n';
+  var emailField = extractTabField_(body, ['メールアドレス', 'Email', 'email']);
+  steps.push('メールアドレス: ' + (emailField || '❌ 未取得'));
 
-  if (parseError) {
-    summary += '⚠ 解析エラー: ' + parseError + '\n\n';
-  } else if (!parsed) {
-    summary += '⚠ 解析結果: TimeRex通知メールとして認識されませんでした。\n\n' +
-      '「CRM_DEBUG」シートにメール本文を出力しました。\n' +
-      '件名または本文に「timerex」「予約が入り」などが含まれているか確認してください。\n';
-  } else {
-    summary += '✅ 解析成功\n\n' +
-      '氏名: '       + (parsed.name       || '（未取得）') + '\n' +
-      'メール: '     + (parsed.email      || '（未取得）') + '\n' +
-      '電話番号: '   + (parsed.phone      || '（未取得）') + '\n' +
-      '面談日: '     + (parsed.mtgDate    ? Utilities.formatDate(parsed.mtgDate, Session.getScriptTimeZone(), 'yyyy/MM/dd') : '（未取得）') + '\n' +
-      '開始時刻: '   + (parsed.mtgStart   || '（未取得）') + '\n' +
-      '終了時刻: '   + (parsed.mtgEnd     || '（未取得）') + '\n' +
-      '面談方法: '   + (parsed.mtgMethod  || '（未取得）') + '\n' +
-      '担当CA: '     + (parsed.ca         || '（未取得）') + '\n';
-  }
+  var dateRaw = extractTabField_(body, ['日時', '面談日時', '予約日時']);
+  steps.push('日時(生): ' + (dateRaw || '❌ 未取得'));
 
-  summary += '\n→「CRM_DEBUG」シートに詳細を出力しました。\n正規表現の調整が必要な場合はメール本文を共有してください。';
+  var dt = parseTimeRexDatetime_(dateRaw);
+  steps.push('面談日: ' + (dt.date ? Utilities.formatDate(dt.date, Session.getScriptTimeZone(), 'yyyy/MM/dd') : '❌ 未取得'));
+  steps.push('開始時刻: ' + (dt.start || '❌ 未取得'));
+  steps.push('終了時刻: ' + (dt.end   || '❌ 未取得'));
 
-  ui.alert('TimeRexメール解析デバッグ', summary, ui.ButtonSet.OK);
+  var webRoom = extractTabField_(body, ['Web会議室', 'Web会議', 'オンライン会議']);
+  steps.push('Web会議室: ' + (webRoom || '（なし）'));
+  steps.push('面談方法: ' + detectMeetingMethod_(webRoom, body, 'Google Meet'));
+
+  var memo = extractTabField_(body, ['コメント', '備考', 'メモ', '回答内容']);
+  steps.push('コメント: ' + (memo || '（なし）'));
+
+  var senderOk = !config.senderEmail || from.indexOf(config.senderEmail) !== -1;
+  steps.push('\n--- 送信元チェック ---');
+  steps.push('設定の送信元: ' + (config.senderEmail || '（未設定）'));
+  steps.push('実際のFrom: ' + from);
+  steps.push('送信元チェック: ' + (senderOk ? '✅ 通過' : '❌ 失敗 → 設定の送信元アドレスを実際のFromに合わせてください'));
+
+  // デバッグシートに書き出し
+  writeDebugSheet_(ss, subject, from, body, step1 ? {
+    name: name, email: emailField, phone: '', mtgDate: dt.date,
+    mtgStart: dt.start, mtgEnd: dt.end, mtgMethod: detectMeetingMethod_(webRoom, body, 'Google Meet'),
+    ca: config.defaultCa, memo: memo, bookingUrl: webRoom
+  } : null, step1 ? '' : 'TimeRexメールとして認識されませんでした');
+
+  // 解析ステップをシートにも記録
+  var debugSheet = getOrCreateDebugSheet_(ss);
+  var stepRow = debugSheet.getLastRow() + 2;
+  debugSheet.getRange(stepRow, 1).setValue('【解析ステップ詳細】');
+  debugSheet.getRange(stepRow, 1).setFontWeight('bold');
+  steps.forEach(function(s, i) {
+    debugSheet.getRange(stepRow + 1 + i, 1).setValue(s);
+  });
+
+  ui.alert(
+    'Step2: メール解析結果',
+    '件名: ' + subject + '\nFrom: ' + from + '\n\n' +
+    steps.join('\n') + '\n\n' +
+    '詳細は「CRM_DEBUG」シートを確認してください。',
+    ui.ButtonSet.OK
+  );
+}
+
+// ============================================================
+// デバッグシート取得 or 作成
+// ============================================================
+function getOrCreateDebugSheet_(ss) {
+  var name = 'CRM_DEBUG';
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  return sheet;
 }
 
 // ============================================================

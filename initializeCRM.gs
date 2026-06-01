@@ -20,7 +20,8 @@ function onOpen() {
     .addItem('アラートを確認する', 'checkAlerts')
     .addItem('ダッシュボードを更新する', 'updateDashboard')
     .addSeparator()
-    .addItem('TimeRex: メール解析を確認（デバッグ）', 'debugTimeRexEmail')
+    .addItem('TimeRex: Step1 送信元アドレスを確認', 'debugCheckGmailSender')
+    .addItem('TimeRex: Step2 メール解析テスト', 'debugTimeRexEmail')
     .addToUi();
 }
 
