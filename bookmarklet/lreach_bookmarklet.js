@@ -218,32 +218,36 @@ javascript:(function(){
   // ============================================================
   // GASエンドポイントに送信
   // ============================================================
-  // fetchはGASのリダイレクトでCORSが切れるため使えない。
-  // hidden iframe + form 送信はCORSの制約を受けないため確実に動作する。
-  var iframe = document.createElement('iframe');
-  iframe.name = '_crm_iframe';
-  iframe.style.display = 'none';
-  document.body.appendChild(iframe);
+  // LreachのCSPがform-actionをブロックするため、about:blankの新ウィンドウ経由で送信する。
+  // about:blankはLreachのCSPを継承しないため制約なしに送信できる。
+  var payloadJson = JSON.stringify({ records: records });
 
-  var form = document.createElement('form');
-  form.method = 'POST';
-  form.action = ENDPOINT_URL;
-  form.target  = '_crm_iframe';
+  var w = window.open('about:blank', '_blank');
+  if (!w) {
+    alert('ポップアップがブロックされました。\nアドレスバー右端のポップアップブロックアイコンをクリックして許可してください。');
+    return;
+  }
 
-  var input = document.createElement('input');
-  input.type  = 'hidden';
-  input.name  = 'payload';
-  input.value = JSON.stringify({ records: records });
-  form.appendChild(input);
+  w.document.write(
+    '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:30px">' +
+    '<p style="font-size:18px">&#128228; CRMに送信中... (' + records.length + '件)</p>' +
+    '<p style="color:#666">このウィンドウは自動的に閉じます。</p>' +
+    '<form id="f" method="POST" action="' + ENDPOINT_URL + '">' +
+    '<input type="hidden" name="payload" id="p">' +
+    '</form>' +
+    '<scr' + 'ipt>' +
+    'document.getElementById("p").value=' + JSON.stringify(payloadJson) + ';' +
+    'document.getElementById("f").submit();' +
+    'setTimeout(function(){' +
+    'document.body.innerHTML="<p style=\'font-size:20px;color:green\'>&#10003; 送信完了！このタブを閉じてください。</p>";' +
+    '},2000);' +
+    '</scr' + 'ipt>' +
+    '</body></html>'
+  );
+  w.document.close();
 
-  document.body.appendChild(form);
-  form.submit();
-
-  // GASの処理完了を3秒待ってから案内
   setTimeout(function() {
-    document.body.removeChild(form);
-    document.body.removeChild(iframe);
-    alert('【CRM取込 送信完了】\n✅ ' + records.length + '件を送信しました。\n\nスプレッドシートの「Foresma取込」シートに追加されているか確認してください。\n（重複データは自動スキップされます）\n\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
+    alert('【CRM取込 送信完了】\n✅ ' + records.length + '件を送信しました。\n\nForesma取込シートを確認してください。\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
   }, 3000);
 
 })();
