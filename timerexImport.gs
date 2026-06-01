@@ -53,12 +53,17 @@ var MEETING_COL = {
   NEXT_DL:     14   // 次回アクション期限
 };
 
+// このスクリプトが使用するGmailアカウント
+// GASはこのアカウントで認証（承認）する必要があります
+var CRM_GMAIL_ACCOUNT = 'omoroitensyoku@gmail.com';
+
 // 設定シートでTimeRex設定を読み書きする際のラベル
 var TIMEREX_SETTINGS = {
-  SENDER_LABEL:     'TimeRex送信元メールアドレス',
-  DONE_LABEL:       '処理済みGmailラベル',
-  DEFAULT_CA_LABEL: 'TimeRexデフォルト担当CA',
-  DEFAULT_METHOD_LABEL: 'TimeRexデフォルト面談方法'
+  SENDER_LABEL:        'TimeRex送信元メールアドレス',
+  DONE_LABEL:          '処理済みGmailラベル',
+  DEFAULT_CA_LABEL:    'TimeRexデフォルト担当CA',
+  DEFAULT_METHOD_LABEL: 'TimeRexデフォルト面談方法',
+  GMAIL_ACCOUNT_LABEL: 'CRM運用Gmailアカウント'
 };
 
 // ============================================================
@@ -67,6 +72,21 @@ var TIMEREX_SETTINGS = {
 function importTimeRexFromGmail() {
   var ss  = SpreadsheetApp.getActiveSpreadsheet();
   var ui  = SpreadsheetApp.getUi();
+
+  // 実行アカウントの確認
+  var currentUser = Session.getActiveUser().getEmail();
+  if (currentUser && currentUser !== CRM_GMAIL_ACCOUNT) {
+    var proceed = ui.alert(
+      'Gmailアカウントの確認',
+      '現在の実行アカウント: ' + currentUser + '\n' +
+      'CRM運用アカウント: ' + CRM_GMAIL_ACCOUNT + '\n\n' +
+      'アカウントが異なります。\n' +
+      CRM_GMAIL_ACCOUNT + ' で承認したスクリプトから実行してください。\n\n' +
+      'このまま続行しますか？',
+      ui.ButtonSet.YES_NO
+    );
+    if (proceed !== ui.Button.YES) return;
+  }
 
   // 設定を読み込む
   var config = loadTimeRexConfig_(ss);
@@ -508,7 +528,8 @@ function generateMeetingId_(meetingSheet) {
 // ============================================================
 function loadTimeRexConfig_(ss) {
   var config = {
-    senderEmail:   '',
+    gmailAccount:  CRM_GMAIL_ACCOUNT,
+    senderEmail:   'noreply@timerex.net',
     doneLabel:     'CRM処理済',
     defaultCa:     '',
     defaultMethod: 'Zoom'
@@ -521,10 +542,11 @@ function loadTimeRexConfig_(ss) {
   data.forEach(function(row) {
     var label = String(row[0] || '').trim();
     var value = String(row[1] || '').trim();
-    if (label === TIMEREX_SETTINGS.SENDER_LABEL)       config.senderEmail   = value;
-    if (label === TIMEREX_SETTINGS.DONE_LABEL)         config.doneLabel     = value || 'CRM処理済';
-    if (label === TIMEREX_SETTINGS.DEFAULT_CA_LABEL)   config.defaultCa     = value;
-    if (label === TIMEREX_SETTINGS.DEFAULT_METHOD_LABEL) config.defaultMethod = value || 'Zoom';
+    if (label === TIMEREX_SETTINGS.GMAIL_ACCOUNT_LABEL)  config.gmailAccount  = value || CRM_GMAIL_ACCOUNT;
+    if (label === TIMEREX_SETTINGS.SENDER_LABEL)         config.senderEmail   = value || 'noreply@timerex.net';
+    if (label === TIMEREX_SETTINGS.DONE_LABEL)           config.doneLabel     = value || 'CRM処理済';
+    if (label === TIMEREX_SETTINGS.DEFAULT_CA_LABEL)     config.defaultCa     = value;
+    if (label === TIMEREX_SETTINGS.DEFAULT_METHOD_LABEL) config.defaultMethod  = value || 'Zoom';
   });
 
   return config;
@@ -576,22 +598,31 @@ function setupTimeRexSettings() {
 
   var settings = [
     ['■ TimeRex設定', ''],
-    [TIMEREX_SETTINGS.SENDER_LABEL,       'noreply@timerex.net'],
-    [TIMEREX_SETTINGS.DONE_LABEL,         'CRM処理済'],
-    [TIMEREX_SETTINGS.DEFAULT_CA_LABEL,   ''],
-    [TIMEREX_SETTINGS.DEFAULT_METHOD_LABEL, 'Zoom']
+    [TIMEREX_SETTINGS.GMAIL_ACCOUNT_LABEL,   CRM_GMAIL_ACCOUNT],
+    [TIMEREX_SETTINGS.SENDER_LABEL,          'noreply@timerex.net'],
+    [TIMEREX_SETTINGS.DONE_LABEL,            'CRM処理済'],
+    [TIMEREX_SETTINGS.DEFAULT_CA_LABEL,      ''],
+    [TIMEREX_SETTINGS.DEFAULT_METHOD_LABEL,  'Zoom']
   ];
 
   sheet.getRange(insertRow, 1, settings.length, 2).setValues(settings);
   sheet.getRange(insertRow, 1).setBackground('#4285f4').setFontColor('#ffffff').setFontWeight('bold');
   sheet.getRange(insertRow + 1, 1, settings.length - 1, 1).setFontWeight('bold');
   sheet.getRange(insertRow + 1, 2, settings.length - 1, 1).setBackground('#e8f0fe');
+  // CRM運用アカウント行を目立たせる
+  sheet.getRange(insertRow + 1, 2).setBackground('#fce8e6').setFontWeight('bold');
 
   SpreadsheetApp.getUi().alert(
     'TimeRex設定を追加しました',
-    '設定シートの「TimeRex設定」エリアに以下を入力してください:\n\n' +
-    '・TimeRex送信元メールアドレス\n  （例: noreply@timerex.net）\n\n' +
-    '・TimeRexデフォルト担当CA\n  （担当が特定できない場合の初期値）',
+    '設定シートの「TimeRex設定」エリアを確認してください。\n\n' +
+    '【必須】スクリプトの承認アカウント:\n' +
+    '  ' + CRM_GMAIL_ACCOUNT + '\n\n' +
+    '  Apps Script エディタで「承認」する際に\n' +
+    '  このGoogleアカウントでログインしてください。\n\n' +
+    '【確認】TimeRex送信元メールアドレス:\n' +
+    '  noreply@timerex.net（変更が必要な場合は設定シートで修正）\n\n' +
+    '【任意】TimeRexデフォルト担当CA:\n' +
+    '  担当CAが特定できない場合に使用されます。',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
