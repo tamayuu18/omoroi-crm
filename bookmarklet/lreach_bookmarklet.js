@@ -19,7 +19,7 @@
   // ============================================================
   // ★ 設定 ★
   // ============================================================
-  var ENDPOINT_URL = 'ここにウェブアプリのURLを貼り付け';
+  var ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxrAa8KzeSUafmNNIRrTCiSMm12smGTNtnhgPCAkHsNiIHy1WtGbPetj9WHZbrb9Ikj/exec';
   var DEBUG_MODE   = false; // trueにするとデータを送信せずコンソールに表示
 
   // ============================================================
