@@ -18,6 +18,7 @@ function onOpen() {
     .addItem('TimeRex: Gmailから自動取込', 'importTimeRexFromGmail')
     .addItem('TimeRex: 取込シートから反映', 'importTimeRexData')
     .addSeparator()
+    .addItem('プルダウンを再設定する', 'applyAllDropdowns')
     .addItem('ステータスを同期する', 'syncCustomerStatus')
     .addItem('タスクを更新する', 'createAutoTasks')
     .addItem('アラートを確認する', 'checkAlerts')
@@ -201,11 +202,17 @@ function initializeCRM() {
   try {
     reorderSheets_(ss, sheetOrder);
   } catch (e) {
-    // 順序変更失敗は致命的でないので続行
     errors.push('シート並び替え失敗: ' + e.message);
   }
 
-  // --- Step 7: ログに記録 ---
+  // --- Step 7: プルダウン設定 ---
+  try {
+    applyAllDropdowns_(ss);
+  } catch (e) {
+    errors.push('プルダウン設定失敗: ' + e.message);
+  }
+
+  // --- Step 8: ログに記録 ---
   try {
     appendLog_(ss, '初期化完了', 'initializeCRM', 'CRM初期化処理が完了しました', '成功', errors.join(' / '));
   } catch (e) {
