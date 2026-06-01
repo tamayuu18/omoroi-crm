@@ -20,6 +20,7 @@ function onOpen() {
     .addSeparator()
     .addItem('プルダウンを再設定する', 'applyAllDropdowns')
     .addItem('ステータスを同期する', 'syncCustomerStatus')
+    .addItem('ヨミ管理を同期する', 'syncYomiData')
     .addItem('タスクを更新する', 'createAutoTasks')
     .addItem('アラートを確認する', 'checkAlerts')
     .addItem('ダッシュボードを更新する', 'updateDashboard')

@@ -201,12 +201,185 @@ function checkAlerts() {
 }
 
 // ============================================================
-// ダッシュボード更新（ステータスビュー含む）
+// ダッシュボード更新（全指標を集計して書き込む）
 // ============================================================
 function updateDashboard() {
   var ss   = SpreadsheetApp.getActiveSpreadsheet();
-  updateStatusView_(ss);
-  SpreadsheetApp.getUi().alert('ダッシュボード更新完了', 'ステータス一覧を更新しました。', SpreadsheetApp.getUi().ButtonSet.OK);
+  var ui   = SpreadsheetApp.getUi();
+  var dash = ss.getSheetByName(SHEET_NAMES.DASHBOARD);
+  if (!dash) { ui.alert('エラー', 'ダッシュボードシートが見つかりません。', ui.ButtonSet.OK); return; }
+
+  var now       = new Date();
+  var today     = new Date(now); today.setHours(0,0,0,0);
+  var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // --- データ読み込み ---
+  var custSheet  = ss.getSheetByName(SHEET_NAMES.CUSTOMER);
+  var taskSheet  = ss.getSheetByName(SHEET_NAMES.TASK);
+  var mtgSheet   = ss.getSheetByName(SHEET_NAMES.MEETING);
+  var yomiSheet  = ss.getSheetByName(SHEET_NAMES.YOMI);
+
+  var custData = custSheet && custSheet.getLastRow() >= 2
+    ? custSheet.getRange(2, 1, custSheet.getLastRow()-1, 26).getValues() : [];
+  var taskData = taskSheet && taskSheet.getLastRow() >= 2
+    ? taskSheet.getRange(2, 1, taskSheet.getLastRow()-1, 11).getValues() : [];
+  var mtgData  = mtgSheet  && mtgSheet.getLastRow()  >= 2
+    ? mtgSheet.getRange(2, 1, mtgSheet.getLastRow()-1, 9).getValues()   : [];
+  var yomiData = yomiSheet && yomiSheet.getLastRow() >= 2
+    ? yomiSheet.getRange(2, 1, yomiSheet.getLastRow()-1, 18).getValues(): [];
+
+  // --- ステータス別集計 ---
+  var statusCount = {}; var caCount = {};
+  custData.forEach(function(r) {
+    var s  = String(r[CUSTOMER_COL.STATUS] || '').trim();
+    var ca = String(r[CUSTOMER_COL.CA]     || '未設定').trim();
+    var rd = r[CUSTOMER_COL.REG_DATE];
+    statusCount[s] = (statusCount[s] || 0) + 1;
+    if (!caCount[ca]) caCount[ca] = { total:0, newMonth:0 };
+    caCount[ca].total++;
+    if (rd instanceof Date && rd >= monthStart) caCount[ca].newMonth++;
+  });
+
+  // --- タスク集計 ---
+  var taskOverdue = 0; var taskToday = 0; var taskThisWeek = 0;
+  var weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+  taskData.forEach(function(r) {
+    var st = String(r[TASK_COL.STATUS]   || '').trim();
+    var dl = r[TASK_COL.DEADLINE];
+    if (st === '完了' || st === '保留') return;
+    if (!(dl instanceof Date)) return;
+    var d = new Date(dl); d.setHours(0,0,0,0);
+    if (d < today)          taskOverdue++;
+    else if (d.getTime() === today.getTime()) taskToday++;
+    else if (d <= weekEnd)  taskThisWeek++;
+  });
+
+  // --- 面談集計 ---
+  var mtgToday = 0; var mtgMonth = 0;
+  mtgData.forEach(function(r) {
+    var d = r[MEETING_COL.MTG_DATE];
+    if (!(d instanceof Date)) return;
+    var day = new Date(d); day.setHours(0,0,0,0);
+    if (day.getTime() === today.getTime()) mtgToday++;
+    if (d >= monthStart) mtgMonth++;
+  });
+
+  // --- ヨミ集計 ---
+  // YOMI列: ヨミID(0),顧客ID(1),氏名(2),担当CA(3),現在ステータス(4),ヨミランク(5),
+  //         成約確度(6),想定成約月(7),想定入社日(8),想定年収(9),手数料率(10),
+  //         想定売上(11),加重売上(12),...
+  var yomiSummary = { A:0, B:0, C:0, sales:0, weighted:0 };
+  yomiData.forEach(function(r) {
+    var rank     = String(r[5]  || '').trim();
+    var sales    = Number(r[11] || 0);
+    var weighted = Number(r[12] || 0);
+    if (rank === 'A') yomiSummary.A++;
+    if (rank === 'B') yomiSummary.B++;
+    if (rank === 'C') yomiSummary.C++;
+    yomiSummary.sales    += sales;
+    yomiSummary.weighted += weighted;
+  });
+
+  // --- 月次KPI ---
+  var monthlyKpi = { sent:0, mtgBooked:0, mtgDone:0, applied:0, offer:0, accept:0, joined:0 };
+  custData.forEach(function(r) {
+    var rd = r[CUSTOMER_COL.REG_DATE];
+    var st = String(r[CUSTOMER_COL.STATUS] || '').trim();
+    if (rd instanceof Date && rd >= monthStart) monthlyKpi.sent++;
+  });
+  mtgData.forEach(function(r) {
+    var d = r[MEETING_COL.MTG_DATE];
+    var st = String(r[MEETING_COL.STATUS] || '').trim();
+    if (!(d instanceof Date) || d < monthStart) return;
+    if (st === '予約済') monthlyKpi.mtgBooked++;
+    if (st === '実施済') monthlyKpi.mtgDone++;
+  });
+  custData.forEach(function(r) {
+    var st = String(r[CUSTOMER_COL.STATUS] || '').trim();
+    var ud = r[CUSTOMER_COL.UPDATED_AT];
+    if (!(ud instanceof Date) || ud < monthStart) return;
+    if (['応募済み','書類選考中','一次面接予定','一次面接結果待ち','最終面接予定','最終面接結果待ち','内定','承諾','入社予定','入社済み'].indexOf(st) >= 0) monthlyKpi.applied++;
+    if (st === '内定' || st === '承諾' || st === '入社予定' || st === '入社済み') monthlyKpi.offer++;
+    if (st === '承諾' || st === '入社予定' || st === '入社済み') monthlyKpi.accept++;
+    if (st === '入社済み') monthlyKpi.joined++;
+  });
+
+  // --- ダッシュボードに書き込む ---
+  function findRow_(label) {
+    var vals = dash.getRange(1, 1, dash.getLastRow(), 1).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0]).trim() === label) return i + 1;
+    }
+    return -1;
+  }
+  function setVal_(label, val) {
+    var r = findRow_(label);
+    if (r > 0) dash.getRange(r, 2).setValue(val);
+  }
+
+  dash.getRange(findRow_('最終更新'), 2).setValue(now);
+
+  // 日次確認
+  setVal_('本日の面談予定数',    mtgToday);
+  setVal_('本日の対応タスク数',  taskToday);
+  setVal_('期限超過タスク数',    taskOverdue);
+  setVal_('新規送客数（本日）',  statusCount['新規送客'] || 0);
+  setVal_('初回未対応数',        statusCount['初回未対応'] || 0);
+  setVal_('面談後未更新数',      statusCount['面談実施済み'] || 0);
+
+  // ヨミ管理
+  setVal_('Aヨミ件数', yomiSummary.A);
+  setVal_('Bヨミ件数', yomiSummary.B);
+  setVal_('Cヨミ件数', yomiSummary.C);
+  setVal_('今月の想定売上合計', yomiSummary.sales);
+  setVal_('今月の加重売上合計', yomiSummary.weighted);
+
+  // CA別KPI
+  var caRow = findRow_('CA名');
+  if (caRow > 0) {
+    var caNames = Object.keys(caCount).filter(function(c){ return c !== '未設定'; }).sort();
+    caNames.forEach(function(ca, i) {
+      var mtgCount = mtgData.filter(function(r){
+        return String(r[MEETING_COL.CA] || '').trim() === ca && r[MEETING_COL.MTG_DATE] instanceof Date && r[MEETING_COL.MTG_DATE] >= monthStart;
+      }).length;
+      dash.getRange(caRow + 1 + i, 1).setValue(ca);
+      dash.getRange(caRow + 1 + i, 2).setValue(caCount[ca].total);
+      dash.getRange(caRow + 1 + i, 3).setValue(mtgCount);
+      dash.getRange(caRow + 1 + i, 4).setValue('');
+    });
+  }
+
+  // 月次KPI
+  setVal_('月間送客数',     monthlyKpi.sent);
+  setVal_('月間面談予約数', monthlyKpi.mtgBooked);
+  setVal_('月間面談実施数', monthlyKpi.mtgDone);
+  setVal_('月間応募数',     monthlyKpi.applied);
+  setVal_('月間内定数',     monthlyKpi.offer);
+  setVal_('月間承諾数',     monthlyKpi.accept);
+  setVal_('月間入社数',     monthlyKpi.joined);
+
+  // ファネル
+  setVal_('① 送客数', custData.length);
+  var funnelLabels = {
+    '② 初回連絡済み': ['初回連絡済み','不通'],
+    '③ 面談設定済み': ['面談予約済み'],
+    '④ 面談実施済み': ['面談実施済み','求人提案中','応募意思確認中'],
+    '⑤ 応募済み':     ['応募済み','書類選考中','一次面接予定','一次面接結果待ち','最終面接予定','最終面接結果待ち'],
+    '⑥ 内定':         ['内定','承諾','入社予定','入社済み']
+  };
+  Object.keys(funnelLabels).forEach(function(label) {
+    var cnt = funnelLabels[label].reduce(function(sum, s){ return sum + (statusCount[s] || 0); }, 0);
+    setVal_(label, cnt);
+  });
+
+  // タスク期限状況をステータスビューの後に追記
+  updateStatusView();
+
+  appendLog_(ss, 'ダッシュボード更新', 'updateDashboard', '全指標を更新しました', '成功', '');
+  ui.alert('ダッシュボード更新完了',
+    '以下を更新しました:\n' +
+    '・日次確認\n・ヨミ管理\n・CA別KPI\n・月次KPI\n・ファネル\n・ステータス別件数',
+    ui.ButtonSet.OK);
 }
 
 function updateStatusView_(ss) {
@@ -358,5 +531,112 @@ function syncCustomerStatus() {
   ui.alert('ステータス同期完了',
     updated + '件の顧客ステータスを更新しました。\n\n' +
     '面談管理・選考管理の状況を顧客マスタに反映しました。',
+    ui.ButtonSet.OK);
+}
+
+// ============================================================
+// ヨミ管理: 顧客マスタからヨミランク付き顧客を同期
+// ============================================================
+function syncYomiData() {
+  var ss        = SpreadsheetApp.getActiveSpreadsheet();
+  var ui        = SpreadsheetApp.getUi();
+  var custSheet = ss.getSheetByName(SHEET_NAMES.CUSTOMER);
+  var yomiSheet = ss.getSheetByName(SHEET_NAMES.YOMI);
+  if (!custSheet || !yomiSheet) {
+    ui.alert('エラー', '必要なシートが見つかりません。', ui.ButtonSet.OK);
+    return;
+  }
+
+  var now     = new Date();
+  var added   = 0;
+  var updated = 0;
+
+  // 既存ヨミ管理を顧客IDでインデックス化
+  // YOMI列: ヨミID(0),顧客ID(1),氏名(2),担当CA(3),現在ステータス(4),ヨミランク(5),...最終更新日(17)
+  var yomiIndex = {};
+  if (yomiSheet.getLastRow() >= 2) {
+    var yomiVals = yomiSheet.getRange(2, 1, yomiSheet.getLastRow()-1, 18).getValues();
+    yomiVals.forEach(function(r, i) {
+      var cid = String(r[1] || '').trim();
+      if (cid) yomiIndex[cid] = { row: i + 2, data: r };
+    });
+  }
+
+  if (custSheet.getLastRow() < 2) {
+    ui.alert('ヨミ管理同期', '顧客マスタにデータがありません。', ui.ButtonSet.OK);
+    return;
+  }
+
+  var custData = custSheet.getRange(2, 1, custSheet.getLastRow()-1, 26).getValues();
+
+  // ヨミ対象ステータス（面談以降の進行中顧客）
+  var yomiTargetStatus = [
+    '面談実施済み', '求人提案中', '応募意思確認中', '応募済み',
+    '書類選考中', '一次面接予定', '一次面接結果待ち',
+    '最終面接予定', '最終面接結果待ち', '内定', '承諾', '入社予定'
+  ];
+
+  // ステータス → デフォルトヨミランクのマッピング
+  var statusToRank = {
+    '面談実施済み':       'D',
+    '求人提案中':         'D',
+    '応募意思確認中':     'D',
+    '応募済み':           'C',
+    '書類選考中':         'C',
+    '一次面接予定':       'C',
+    '一次面接結果待ち':   'C',
+    '最終面接予定':       'B',
+    '最終面接結果待ち':   'B',
+    '内定':               'A',
+    '承諾':               'A',
+    '入社予定':           'A'
+  };
+
+  custData.forEach(function(r) {
+    var custId = String(r[CUSTOMER_COL.ID]     || '').trim();
+    var name   = String(r[CUSTOMER_COL.NAME]   || '').trim();
+    var ca     = String(r[CUSTOMER_COL.CA]     || '').trim();
+    var status = String(r[CUSTOMER_COL.STATUS] || '').trim();
+    var yomiRank = String(r[CUSTOMER_COL.YOMI_RANK] || '').trim();
+
+    if (!custId || !name) return;
+
+    // ヨミランクが設定されているか、ヨミ対象ステータスの顧客を対象
+    var defaultRank = statusToRank[status] || yomiRank;
+    if (!defaultRank && yomiTargetStatus.indexOf(status) < 0) return;
+
+    var rank = yomiRank || defaultRank || 'D';
+
+    if (yomiIndex[custId]) {
+      // 既存行: ステータス・ヨミランク・最終更新日のみ更新
+      var existRow = yomiIndex[custId].row;
+      yomiSheet.getRange(existRow, 3).setValue(name);
+      yomiSheet.getRange(existRow, 4).setValue(ca);
+      yomiSheet.getRange(existRow, 5).setValue(status);
+      if (!yomiIndex[custId].data[5]) {  // ヨミランク未設定なら自動設定
+        yomiSheet.getRange(existRow, 6).setValue(rank);
+      }
+      yomiSheet.getRange(existRow, 18).setValue(now);
+      updated++;
+    } else {
+      // 新規行追加
+      var yomiId = 'Y-' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyyMMdd') +
+        '-' + String(yomiSheet.getLastRow()).padStart(3, '0');
+      var newRow = [
+        yomiId, custId, name, ca, status, rank,
+        '', '', '', '', '', '', '', '', '',  // 成約確度〜ネック要因（手動入力）
+        '', '', now                           // 次回アクション, 期限, 最終更新日
+      ];
+      yomiSheet.appendRow(newRow);
+      yomiIndex[custId] = { row: yomiSheet.getLastRow(), data: newRow };
+      added++;
+    }
+  });
+
+  appendLog_(ss, 'ヨミ管理同期', 'syncYomiData',
+    added + '件追加、' + updated + '件更新', '成功', '');
+  ui.alert('ヨミ管理同期完了',
+    '✅ 新規追加: ' + added + '件\n🔄 更新: ' + updated + '件\n\n' +
+    '想定売上・手数料率はヨミ管理シートで直接入力してください。',
     ui.ButtonSet.OK);
 }
