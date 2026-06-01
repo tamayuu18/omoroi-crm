@@ -29,7 +29,11 @@ function doPost(e) {
   var result = { status: 'error', message: '' };
 
   try {
-    var payload = JSON.parse(e.postData.contents);
+    // フォーム送信（payload パラメータ）と JSON POST の両方に対応
+    var rawBody = (e.parameter && e.parameter.payload)
+      ? e.parameter.payload
+      : e.postData.contents;
+    var payload = JSON.parse(rawBody);
     var records = payload.records; // 顧客データの配列
 
     if (!records || !Array.isArray(records) || records.length === 0) {

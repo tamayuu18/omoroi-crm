@@ -218,23 +218,32 @@ javascript:(function(){
   // ============================================================
   // GASエンドポイントに送信
   // ============================================================
-  // Content-Type: text/plain にすることでプリフライトなしのシンプルリクエストになり
-  // GASが自動でCORSを許可してレスポンスを読み取れる。
-  fetch(ENDPOINT_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body:    JSON.stringify({ records: records })
-  })
-  .then(function(res){ return res.json(); })
-  .then(function(data){
-    if (data.status === 'ok') {
-      alert('【CRM取込 完了】\n✅ ' + data.added + '件 追加\n⏭ ' + data.skipped + '件 スキップ（重複）\n\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
-    } else {
-      alert('【CRM取込 エラー】\n' + (data.message || JSON.stringify(data)));
-    }
-  })
-  .catch(function(err){
-    alert('【CRM取込 通信エラー】\n' + err.message);
-  });
+  // fetchはGASのリダイレクトでCORSが切れるため使えない。
+  // hidden iframe + form 送信はCORSの制約を受けないため確実に動作する。
+  var iframe = document.createElement('iframe');
+  iframe.name = '_crm_iframe';
+  iframe.style.display = 'none';
+  document.body.appendChild(iframe);
+
+  var form = document.createElement('form');
+  form.method = 'POST';
+  form.action = ENDPOINT_URL;
+  form.target  = '_crm_iframe';
+
+  var input = document.createElement('input');
+  input.type  = 'hidden';
+  input.name  = 'payload';
+  input.value = JSON.stringify({ records: records });
+  form.appendChild(input);
+
+  document.body.appendChild(form);
+  form.submit();
+
+  // GASの処理完了を3秒待ってから案内
+  setTimeout(function() {
+    document.body.removeChild(form);
+    document.body.removeChild(iframe);
+    alert('【CRM取込 送信完了】\n✅ ' + records.length + '件を送信しました。\n\nスプレッドシートの「Foresma取込」シートに追加されているか確認してください。\n（重複データは自動スキップされます）\n\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
+  }, 3000);
 
 })();
