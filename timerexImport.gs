@@ -353,139 +353,176 @@ function buildMeetingRow_(meetingId, customerId, name, timerexRow) {
 
 // ============================================================
 // Gmailメールの解析
+// ------------------------------------------------------------
+// 対応するTimeRexメール形式（実際の通知メールに基づく）:
+//
+// 件名: 生駒翔平さんが新しい予定を追加しました
+//
+// 予定名      Agent面談（Agent面談）
+// 日時        2026年6月2日（火）20:30 - 21:15（Asia/Tokyo）
+// 参加メンバー 株式会社おもろい
+// Web会議室   https://meet.google.com/wuc-jcbx-rzo
+// ミーティングID wuc-jcbx-rzo
+//
+// ---- 入力情報 ----
+// 会社名
+// 名前        生駒翔平
+// メールアドレス lreach_schedule@foresma.jp
+// コメント    foresma Lリーチ 送客
 // ============================================================
 function parseTimeRexEmail_(message, config) {
   var subject = message.getSubject();
   var body    = message.getPlainBody();
   var from    = message.getFrom();
 
-  // 送信元アドレスの確認
+  // 送信元アドレスの確認（設定されている場合のみ）
   if (config.senderEmail && from.indexOf(config.senderEmail) === -1) return null;
 
-  // TimeRex通知メールかどうかを判定（件名または本文でチェック）
-  var isTimeRex = /timerex|予約(が入り|通知|確認|完了)/i.test(subject) ||
-                  /timerex|予約が入り/i.test(body);
+  // TimeRex通知メールかどうかを判定
+  // 件名: 「○○さんが新しい予定を追加しました」
+  // 本文: 「TimeRexから〜さんが予定を追加しました」
+  var isTimeRex = /さんが新しい予定を追加|さんが予定を追加|timerex/i.test(subject) ||
+                  /TimeRexから.+さんが.+追加/i.test(body);
   if (!isTimeRex) return null;
 
-  // ---- 各フィールドを抽出 ----
-  var result = {
-    bookingId:  extractField_(body, ['予約ID', 'BookingID', '予約番号']),
-    name:       extractField_(body, ['お名前', '氏名', 'お客様名', '予約者名', 'Name']),
-    email:      extractEmail_(body),
-    phone:      extractField_(body, ['電話番号', 'お電話番号', 'TEL', 'Tel', '携帯番号']),
-    mtgDateRaw: extractField_(body, ['日時', '面談日時', '予約日時', '開始日時', '面談日']),
-    mtgMethod:  extractField_(body, ['面談方法', '面談形式', '実施方法', 'ミーティング方法']),
-    ca:         extractField_(body, ['担当', '担当者', '担当CA', 'ホスト']),
-    memo:       extractMemo_(body),
-    bookingUrl: extractUrl_(body, ['timerex.net']),
+  // ---- 氏名: 件名から取得（「○○さんが新しい予定を追加しました」）----
+  var name = '';
+  var nameFromSubject = subject.match(/^(.+?)さんが新しい予定|^(.+?)さんが予定/);
+  if (nameFromSubject) {
+    name = (nameFromSubject[1] || nameFromSubject[2] || '').trim();
+  }
+  // 件名で取れなければ入力情報の「名前」フィールドから
+  if (!name) {
+    name = extractTabField_(body, ['名前', 'お名前', '氏名']);
+  }
+
+  // ---- メールアドレス ----
+  // 入力情報の「メールアドレス」フィールドを優先（本文内の最初のメールアドレス）
+  var emailFromField = extractTabField_(body, ['メールアドレス', 'Email', 'email']);
+  var email = emailFromField || extractFirstEmail_(body);
+
+  // ---- 電話番号 ----
+  var phone = extractTabField_(body, ['電話番号', 'TEL', 'Tel', '携帯番号', '電話']);
+
+  // ---- 日時: 「2026年6月2日（火）20:30 - 21:15（Asia/Tokyo）」----
+  var mtgDateRaw = extractTabField_(body, ['日時', '面談日時', '予約日時']);
+  var datetime   = parseTimeRexDatetime_(mtgDateRaw);
+
+  // ---- 面談方法: Web会議室のURLから判定 ----
+  var webRoom   = extractTabField_(body, ['Web会議室', 'Web会議', 'オンライン会議']);
+  var mtgMethod = detectMeetingMethod_(webRoom, body, config.defaultMethod);
+
+  // ---- 予約URL: Web会議室のURLまたはTimeRex URL ----
+  var bookingUrl = extractFirstUrl_(webRoom) || extractFirstUrl_(body);
+
+  // ---- 担当CA: 設定のデフォルトCAを使用（メールからは特定困難）----
+  var ca = config.defaultCa || '';
+
+  // ---- メモ: コメント・備考フィールド ----
+  var memo = extractTabField_(body, ['コメント', '備考', 'メモ', '回答内容', 'ご要望']);
+
+  // ---- 予定名 ----
+  var eventName = extractTabField_(body, ['予定名', '予約名', '件名']);
+
+  return {
+    bookingId:  '',  // TimeRexメールには予約IDが含まれない場合あり
+    name:       name,
+    email:      email.toLowerCase(),
+    phone:      normalizePhone_(phone),
+    mtgDate:    datetime.date,
+    mtgStart:   datetime.start,
+    mtgEnd:     datetime.end,
+    mtgMethod:  mtgMethod,
+    ca:         ca,
+    memo:       memo + (eventName ? '【予定名】' + eventName : ''),
+    bookingUrl: bookingUrl,
     recvDate:   message.getDate(),
     rawBody:    body
   };
-
-  // 氏名がない場合は件名から推測
-  if (!result.name) {
-    var nameFromSubject = subject.match(/【(.+?)】|「(.+?)」|^予約:.+?（(.+?)）/);
-    if (nameFromSubject) result.name = nameFromSubject[1] || nameFromSubject[2] || nameFromSubject[3];
-  }
-
-  // 日時の解析
-  var parsed = parseDatetime_(result.mtgDateRaw, result.rawBody);
-  result.mtgDate  = parsed.date;
-  result.mtgStart = parsed.start;
-  result.mtgEnd   = parsed.end;
-
-  // 面談方法の正規化
-  result.mtgMethod = normalizeMeetingMethod_(result.mtgMethod, config.defaultMethod);
-
-  // デフォルトCA（設定値があれば補完）
-  if (!result.ca && config.defaultCa) result.ca = config.defaultCa;
-
-  return result;
 }
 
 // ============================================================
-// フィールド抽出ユーティリティ
+// フィールド抽出: タブ区切り or スペース区切り対応
+// TimeRexメールはHTMLテーブルをプレーンテキスト化するため
+// 「ラベル\t値」または「ラベル  値」の形式になる
 // ============================================================
-function extractField_(body, labels) {
+function extractTabField_(body, labels) {
   for (var i = 0; i < labels.length; i++) {
-    // "ラベル: 値" または "ラベル：値" または "ラベル\t値" にマッチ
-    var regex = new RegExp(labels[i] + '\\s*[：:：]\\s*(.+)', 'i');
-    var match = body.match(regex);
-    if (match && match[1]) {
-      return match[1].split(/[\r\n]/)[0].trim();
-    }
+    // タブ区切り: 「名前\t生駒翔平」
+    var tabRegex = new RegExp(labels[i] + '[ \t]+([^\r\n]+)', 'i');
+    var m = body.match(tabRegex);
+    if (m && m[1] && m[1].trim()) return m[1].trim();
+
+    // コロン区切り: 「名前：生駒翔平」「名前: 生駒翔平」
+    var colonRegex = new RegExp(labels[i] + '\\s*[：::]\\s*([^\r\n]+)', 'i');
+    m = body.match(colonRegex);
+    if (m && m[1] && m[1].trim()) return m[1].trim();
   }
   return '';
 }
 
-function extractEmail_(body) {
-  var match = body.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
-  return match ? match[0].toLowerCase() : '';
+function extractFirstEmail_(body) {
+  var m = body.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  return m ? m[0] : '';
 }
 
-function extractUrl_(body, domains) {
-  var lines = body.split(/[\r\n]+/);
-  for (var i = 0; i < lines.length; i++) {
-    var urlMatch = lines[i].match(/https?:\/\/[^\s]+/);
-    if (urlMatch) {
-      for (var d = 0; d < domains.length; d++) {
-        if (urlMatch[0].indexOf(domains[d]) !== -1) return urlMatch[0];
-      }
-    }
-  }
-  return '';
-}
-
-function extractMemo_(body) {
-  // 「回答内容」「ご要望」「メモ」以降の段落を取得
-  var match = body.match(/(?:回答内容|ご要望|お問い合わせ内容|備考|メモ)\s*[：:]\s*([\s\S]+?)(?:\n\n|\r\n\r\n|$)/i);
-  return match ? match[1].trim() : '';
+function extractFirstUrl_(text) {
+  if (!text) return '';
+  var m = text.match(/https?:\/\/[^\s）\)]+/);
+  return m ? m[0] : '';
 }
 
 // ============================================================
 // 日時解析
+// 対応フォーマット:
+//   「2026年6月2日（火）20:30 - 21:15（Asia/Tokyo）」
+//   「2026年6月2日（火）20:30〜21:15」
+//   「2026/06/02 20:30 - 21:15」
 // ============================================================
-function parseDatetime_(rawDatetime, body) {
+function parseTimeRexDatetime_(raw) {
   var result = { date: '', start: '', end: '' };
-  if (!rawDatetime && !body) return result;
+  if (!raw) return result;
 
-  var text = rawDatetime || body;
+  // 年月日の抽出
+  var dateMatch = raw.match(/(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
+  if (!dateMatch) return result;
 
-  // パターン例: 「2026年6月1日（月）14:00〜15:00」
-  var fullPattern = /(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})日?[\s\S]{0,10}?(\d{1,2}):(\d{2})(?:[〜～\-〜](\d{1,2}):(\d{2}))?/;
-  var m = text.match(fullPattern);
-  if (m) {
-    result.date  = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
-    result.start = zeroPad_(m[4], 2) + ':' + m[5];
-    result.end   = m[6] ? zeroPad_(m[6], 2) + ':' + m[7] : '';
+  result.date = new Date(
+    parseInt(dateMatch[1]),
+    parseInt(dateMatch[2]) - 1,
+    parseInt(dateMatch[3])
+  );
+
+  // 開始・終了時刻の抽出
+  // 「20:30 - 21:15」「20:30〜21:15」「20:30 ～ 21:15」
+  var timeMatch = raw.match(/(\d{1,2}):(\d{2})\s*[-〜～]\s*(\d{1,2}):(\d{2})/);
+  if (timeMatch) {
+    result.start = zeroPad_(timeMatch[1], 2) + ':' + timeMatch[2];
+    result.end   = zeroPad_(timeMatch[3], 2) + ':' + timeMatch[4];
     return result;
   }
 
-  // 日付のみのパターン
-  var dateOnly = text.match(/(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
-  if (dateOnly) {
-    result.date = new Date(parseInt(dateOnly[1]), parseInt(dateOnly[2]) - 1, parseInt(dateOnly[3]));
-  }
-
-  // 時刻のみのパターン（別行にある場合）
-  var timePattern = body.match(/(\d{1,2}):(\d{2})(?:[〜～\-](\d{1,2}):(\d{2}))?/);
-  if (timePattern) {
-    result.start = zeroPad_(timePattern[1], 2) + ':' + timePattern[2];
-    result.end   = timePattern[3] ? zeroPad_(timePattern[3], 2) + ':' + timePattern[4] : '';
+  // 終了時刻なし（開始時刻のみ）
+  var startOnly = raw.match(/(\d{1,2}):(\d{2})/);
+  if (startOnly) {
+    result.start = zeroPad_(startOnly[1], 2) + ':' + startOnly[2];
   }
 
   return result;
 }
 
-function normalizeMeetingMethod_(raw, defaultMethod) {
-  if (!raw) return defaultMethod || '';
-  var lower = raw.toLowerCase();
-  if (/zoom/i.test(raw))             return 'Zoom';
-  if (/meet|google/i.test(raw))      return 'Google Meet';
-  if (/teams/i.test(raw))            return 'Google Meet'; // Teamsは近いものに
-  if (/電話|phone|tel/i.test(raw))   return '電話';
-  if (/対面|来社|訪問/i.test(raw))   return '対面';
-  return raw;
+// ============================================================
+// 面談方法の判定
+// Web会議室URLからZoom/Google Meetを自動判別
+// ============================================================
+function detectMeetingMethod_(webRoomField, body, defaultMethod) {
+  var text = (webRoomField + ' ' + body).toLowerCase();
+  if (/meet\.google\.com/i.test(text))   return 'Google Meet';
+  if (/zoom\.us|zoom\.com/i.test(text))  return 'Zoom';
+  if (/teams\.microsoft/i.test(text))    return 'Google Meet';
+  if (/対面|来社|訪問/i.test(text))     return '対面';
+  if (/電話|phone|tel/i.test(webRoomField)) return '電話';
+  return defaultMethod || 'Google Meet';
 }
 
 // ============================================================
