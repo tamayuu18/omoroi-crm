@@ -181,18 +181,16 @@ javascript:(function(){
   // ============================================================
   // GASエンドポイントに送信
   // ============================================================
+  // no-cors: GASエンドポイントはCORSヘッダを返さないためopaqueレスポンスになる。
+  // データは正常に届くが応答を読み取れないため、送信後に完了メッセージを表示する。
   fetch(ENDPOINT_URL, {
     method:  'POST',
+    mode:    'no-cors',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ records: records })
   })
-  .then(function(res){ return res.json(); })
-  .then(function(data){
-    if (data.status === 'ok') {
-      alert('【CRM取込 完了】\n✅ ' + data.added + '件 追加\n⏭ ' + data.skipped + '件 スキップ（重複）\n\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
-    } else {
-      alert('【CRM取込 エラー】\n' + data.message);
-    }
+  .then(function(){
+    alert('【CRM取込 送信完了】\n✅ ' + records.length + '件を送信しました。\n\nスプレッドシートの「Foresma取込」シートを確認してください。\n重複データは自動でスキップされます。\n\n次に「Foresmaデータを取り込む」を実行して顧客マスタに反映してください。');
   })
   .catch(function(err){
     alert('【CRM取込 通信エラー】\n' + err.message);
