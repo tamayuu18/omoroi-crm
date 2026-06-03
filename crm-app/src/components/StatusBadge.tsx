@@ -58,7 +58,7 @@ export function yomiRankColor(rank: string): string {
   return map[rank] ?? 'bg-gray-100 text-gray-600'
 }
 
-export function YomiRankBadge({ rank }: { rank: string }) {
+export function YomiRankBadge({ rank }: { rank: string | null | undefined }) {
   if (!rank) return null
   return (
     <span className={cn('inline-block rounded-full px-2 py-0.5 text-xs font-bold', yomiRankColor(rank))}>

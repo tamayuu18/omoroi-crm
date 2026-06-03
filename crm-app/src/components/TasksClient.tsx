@@ -7,15 +7,15 @@ import { CheckSquare } from 'lucide-react'
 import type { Task } from '@/types'
 import { cn } from '@/lib/utils'
 
-function fmt(d: string) {
+function fmt(d: Date | string | null | undefined) {
   if (!d) return '—'
-  try { return format(parseISO(d), 'yyyy/MM/dd') } catch { return d }
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd') } catch { return String(d) }
 }
 
 function categorizeTask(task: Task): 'overdue' | 'today' | 'week' | 'later' {
   if (!task.deadline) return 'later'
   try {
-    const d = parseISO(task.deadline)
+    const d = new Date(task.deadline as unknown as string)
     if (task.status === '完了') return 'later'
     if (isAfter(new Date(), d) && !isToday(d)) return 'overdue'
     if (isToday(d)) return 'today'
@@ -61,7 +61,7 @@ export function TasksClient() {
     setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: newStatus } : t))
   }
 
-  const caOptions = Array.from(new Set(tasks.map((t) => t.ca).filter(Boolean))).sort()
+  const caOptions = Array.from(new Set(tasks.map((t) => t.ca).filter((ca): ca is string => !!ca))).sort()
 
   const filtered = tasks.filter((t) => {
     if (caFilter && t.ca !== caFilter) return false

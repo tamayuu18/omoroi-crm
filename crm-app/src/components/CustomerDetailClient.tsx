@@ -35,7 +35,8 @@ function getStageIndex(status: string) {
 }
 
 // History icon
-function historyIcon(type: string) {
+function historyIcon(type: string | null | undefined) {
+  if (!type) return '📝'
   if (type.includes('電話')) return '📞'
   if (type.includes('メール')) return '📧'
   if (type.includes('面談')) return '🤝'
@@ -528,7 +529,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   )
 }
 
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value?: string }) {
+function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value?: string | null }) {
   if (!value) return null
   return (
     <div className="flex items-start gap-2 text-gray-700">

@@ -52,7 +52,7 @@ export function CustomerListClient() {
   useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
   // Build CA options from loaded data
-  const caOptions = Array.from(new Set(customers.map((c) => c.ca).filter(Boolean))).sort()
+  const caOptions = Array.from(new Set(customers.map((c) => c.ca).filter((ca): ca is string => !!ca))).sort()
 
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6">

@@ -64,14 +64,15 @@ export function DashboardClient() {
   const weekMeetings = meetings.filter((m) => {
     if (!m.date) return false
     try {
-      const d = parseISO(m.date)
+      const d = new Date(m.date as unknown as string)
       return isThisWeek(d, { weekStartsOn: 1 }) || isToday(d)
     } catch { return false }
   }).length
   const overdueTasks = tasks.filter((t) => {
     if (t.status === '完了' || !t.deadline) return false
     try {
-      return isAfter(new Date(), parseISO(t.deadline)) && !isToday(parseISO(t.deadline))
+      const d = new Date(t.deadline as unknown as string)
+      return isAfter(new Date(), d) && !isToday(d)
     } catch { return false }
   }).length
 
