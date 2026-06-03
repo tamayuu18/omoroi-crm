@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getHistory } from '@/lib/sheets'
+import { getHistory } from '@/lib/db'
 
 export async function GET(
   _req: NextRequest,

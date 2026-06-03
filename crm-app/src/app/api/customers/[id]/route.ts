@@ -1,8 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getCustomerById, updateCustomerStatus, updateCustomerFields } from '@/lib/sheets'
-import type { Customer } from '@/types'
+import { getCustomerById, updateCustomer } from '@/lib/db'
 
 export async function GET(
   _req: NextRequest,
@@ -31,16 +30,9 @@ export async function PATCH(
 
   const { id } = await ctx.params
   try {
-    const body = await request.json() as Partial<Customer>
-    if (body.status) {
-      await updateCustomerStatus(id, body.status)
-    }
-    const { status: _s, ...rest } = body
-    void _s
-    if (Object.keys(rest).length > 0) {
-      await updateCustomerFields(id, rest)
-    }
-    return Response.json({ success: true })
+    const body = await request.json()
+    const customer = await updateCustomer(id, body)
+    return Response.json(customer)
   } catch (e) {
     console.error(e)
     return Response.json({ error: 'Failed to update customer' }, { status: 500 })

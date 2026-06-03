@@ -1,3 +1,5 @@
+export type { Customer, Task, Meeting, History, Yomi } from '@prisma/client'
+
 export type CustomerStatus =
   | '新規送客'
   | '初回未対応'
@@ -48,77 +50,3 @@ export const ALL_STATUSES: CustomerStatus[] = [
   '失注',
   '長期フォロー',
 ]
-
-export interface Customer {
-  id: string
-  registeredAt: string
-  updatedAt: string
-  inflow: string
-  foresmaId: string
-  name: string
-  kana: string
-  phone: string
-  email: string
-  age: string
-  gender: string
-  area: string
-  company: string
-  job: string
-  salary: string
-  hopeJob: string
-  hopeArea: string
-  hopeSalary: string
-  timing: string
-  ca: string
-  status: CustomerStatus
-  yomiRank: string
-  nextAction: string
-  nextDeadline: string
-  lastContact: string
-  note: string
-}
-
-export interface Task {
-  id: string
-  customerId: string
-  name: string
-  ca: string
-  content: string
-  deadline: string
-  status: string
-  priority: string
-  relatedStatus: string
-  doneAt: string
-  note: string
-}
-
-export interface Meeting {
-  id: string
-  customerId: string
-  name: string
-  ca: string
-  date: string
-  startTime: string
-  endTime: string
-  method: string
-  status: string
-  remind: string
-  result: string
-  temp: string
-  proposal: string
-  nextAction: string
-  nextDeadline: string
-}
-
-export interface History {
-  id: string
-  customerId: string
-  name: string
-  ca: string
-  date: string
-  type: string
-  result: string
-  content: string
-  nextContent: string
-  nextDeadline: string
-}

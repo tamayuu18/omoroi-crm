@@ -12,14 +12,14 @@ import { ALL_STATUSES } from '@/types'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
-function fmt(d: string) {
+function fmt(d: Date | string | null | undefined) {
   if (!d) return '—'
-  try { return format(parseISO(d), 'yyyy/MM/dd') } catch { return d }
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd') } catch { return String(d) }
 }
 
-function fmtDatetime(d: string) {
+function fmtDatetime(d: Date | string | null | undefined) {
   if (!d) return '—'
-  try { return format(parseISO(d), 'yyyy/MM/dd HH:mm') } catch { return d }
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd HH:mm') } catch { return String(d) }
 }
 
 // Pipeline stages for progress bar
@@ -229,7 +229,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       if (cRes.ok) setCustomer(await cRes.json())
       if (tRes.ok) setTasks(await tRes.json())
       if (mRes.ok) setMeetings(await mRes.json())
-      if (hRes.ok) setHistory((await hRes.json() as History[]).sort((a, b) => b.date.localeCompare(a.date)))
+      if (hRes.ok) setHistory((await hRes.json() as History[]).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
     } finally {
       setLoading(false)
     }

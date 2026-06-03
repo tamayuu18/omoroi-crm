@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model Customer {
+  id           String    @id @default(cuid())
+  registeredAt DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  inflow       String?
+  foresmaId    String?
+  name         String
+  kana         String?
+  phone        String?
+  email        String?
+  age          String?
+  gender       String?
+  area         String?
+  company      String?
+  job          String?
+  salary       String?
+  hopeJob      String?
+  hopeArea     String?
+  hopeSalary   String?
+  timing       String?
+  ca           String?
+  status       String    @default("初回未対応")
+  yomiRank     String?
+  nextAction   String?
+  nextDeadline DateTime?
+  lastContact  DateTime?
+  note         String?
+
+  tasks    Task[]
+  meetings Meeting[]
+  history  History[]
+  yomi     Yomi[]
+
+  @@index([status])
+  @@index([ca])
+}
+
+model Task {
+  id            String    @id @default(cuid())
+  customerId    String
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name          String
+  ca            String?
+  content       String
+  deadline      DateTime?
+  status        String    @default("未対応")
+  priority      String?
+  relatedStatus String?
+  doneAt        DateTime?
+  note          String?
+  createdAt     DateTime  @default(now())
+
+  @@index([customerId])
+  @@index([deadline])
+  @@index([status])
+}
+
+model Meeting {
+  id           String    @id @default(cuid())
+  customerId   String
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name         String
+  ca           String?
+  date         DateTime?
+  startTime    String?
+  endTime      String?
+  method       String?
+  status       String    @default("予約済")
+  remind       String?
+  result       String?
+  temp         String?
+  proposal     String?
+  nextAction   String?
+  nextDeadline DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([customerId])
+  @@index([date])
+}
+
+model History {
+  id           String    @id @default(cuid())
+  customerId   String
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name         String
+  ca           String?
+  date         DateTime  @default(now())
+  type         String?
+  result       String?
+  content      String?
+  nextContent  String?
+  nextDeadline DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([customerId])
+}
+
+model Yomi {
+  id              String    @id @default(cuid())
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name            String
+  ca              String?
+  status          String?
+  rank            String?
+  probability     String?
+  expectedMonth   String?
+  expectedJoinDate DateTime?
+  expectedSalary  String?
+  feeRate         String?
+  expectedRevenue String?
+  weightedRevenue String?
+  reason          String?
+  obstacles       String?
+  nextAction      String?
+  nextDeadline    DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([customerId])
+}

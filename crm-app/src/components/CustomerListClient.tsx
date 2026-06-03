@@ -9,14 +9,14 @@ import { ALL_STATUSES } from '@/types'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
-function formatDate(d: string) {
+function formatDate(d: Date | string | null | undefined) {
   if (!d) return ''
-  try { return format(parseISO(d), 'yyyy/MM/dd') } catch { return d }
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd') } catch { return String(d) }
 }
 
-function isOverdue(deadline: string) {
+function isOverdue(deadline: Date | string | null | undefined) {
   if (!deadline) return false
-  try { return isAfter(new Date(), parseISO(deadline)) } catch { return false }
+  try { return isAfter(new Date(), typeof deadline === 'string' ? parseISO(deadline) : deadline) } catch { return false }
 }
 
 export function CustomerListClient() {

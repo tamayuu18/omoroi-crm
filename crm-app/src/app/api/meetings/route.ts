@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getMeetings } from '@/lib/sheets'
+import { getMeetings } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams
     const customerId = params.get('customerId') ?? undefined
-    const meetings = await getMeetings(customerId)
+    const meetings = await getMeetings({ customerId })
     return Response.json(meetings)
   } catch (e) {
     console.error(e)
