@@ -19,9 +19,10 @@
 javascript:(function(){
 
   // ============================================================
-  // ★ GASウェブアプリのURL（デプロイ済み）★
+  // ★ CRM WebアプリのURL ★
   // ============================================================
-  var ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxrAa8KzeSUafmNNIRrTCiSMm12smGTNtnhgPCAkHsNiIHy1WtGbPetj9WHZbrb9Ikj/exec';
+  var ENDPOINT_URL = 'https://omoroi-crm.vercel.app/api/ingest/lreach';
+  var INGEST_TOKEN = 'crm-ingest-secret-2024';
 
   // ============================================================
   // Step1: __NEXT_DATA__ からAPIデータを取得（最優先）
@@ -200,15 +201,12 @@ javascript:(function(){
   var preview = records.slice(0, 5).map(function(r){ return '・' + r.name + (r.phone ? ' (' + r.phone + ')' : ''); }).join('\n');
   if (records.length > 5) preview += '\n  ほか ' + (records.length - 5) + '件';
 
-  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nスプレッドシートに送信しますか？')) return;
+  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nCRMに送信しますか？')) return;
 
   // ============================================================
-  // about:blank ポップアップ経由でGASに送信
-  // Lreach の CSP は fetch/form-action を外部ドメインにブロックするが
-  // about:blank ウィンドウは CSP を継承しないため制限なし。
-  // no-cors fetch でシンプルPOST → GAS が doPost を実行。
+  // about:blank ポップアップ経由でCRM APIに送信
   // ============================================================
-  var payloadBody = 'payload=' + encodeURIComponent(JSON.stringify({ records: records }));
+  var payloadJson = JSON.stringify({ records: records });
 
   var w = window.open('', '_blank', 'width=360,height=180,left=100,top=100');
   if (!w) {
@@ -216,9 +214,10 @@ javascript:(function(){
     return;
   }
 
-  var escUrl  = JSON.stringify(ENDPOINT_URL);
-  var escBody = JSON.stringify(payloadBody);
-  var cnt     = records.length;
+  var escUrl   = JSON.stringify(ENDPOINT_URL);
+  var escToken = JSON.stringify(INGEST_TOKEN);
+  var escBody  = JSON.stringify(payloadJson);
+  var cnt      = records.length;
 
   w.document.write(
     '<!DOCTYPE html><html><head><meta charset="utf-8">' +
@@ -226,21 +225,23 @@ javascript:(function(){
     'p{font-size:15px;color:#333;margin:0 0 8px}' +
     '.sub{font-size:12px;color:#666}</style>' +
     '</head><body>' +
-    '<p id="s">&#128228; GASに送信中... (' + cnt + '件)</p>' +
-    '<p class="sub" id="d">絕対にこのウィンドウを閉じないでください</p>' +
+    '<p id="s">&#128228; CRMに送信中... (' + cnt + '件)</p>' +
+    '<p class="sub" id="d">このウィンドウを閉じないでください</p>' +
     '<script>' +
     'var url=' + escUrl + ';' +
+    'var token=' + escToken + ';' +
     'var body=' + escBody + ';' +
-    'fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body,redirect:"follow"})' +
-    '.then(function(){' +
-    '  document.getElementById("s").textContent="✅ 送信完了！";' +
+    'fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-ingest-token":token},body:body})' +
+    '.then(function(r){return r.json();})' +
+    '.then(function(d){' +
+    '  document.getElementById("s").textContent="✅ 送信完了！ 追加:"+d.added+"件 スキップ:"+d.skipped+"件";' +
     '  document.getElementById("d").textContent="このウィンドウを閉じてください";' +
     '  try{window.opener.postMessage("crm_ok_' + cnt + '","*");}catch(e){}' +
     '  setTimeout(function(){try{window.close();}catch(e){}},3000);' +
     '})' +
     '.catch(function(err){' +
     '  document.getElementById("s").textContent="❌ エラー: "+err.message;' +
-    '  document.getElementById("d").textContent="エラーが発生しました。コンソールを確認してください";' +
+    '  document.getElementById("d").textContent="エラーが発生しました";' +
     '});' +
     '<\/script></body></html>'
   );
