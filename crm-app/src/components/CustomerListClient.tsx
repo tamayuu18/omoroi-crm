@@ -19,6 +19,8 @@ function isOverdue(deadline: Date | string | null | undefined) {
   try { return isAfter(new Date(), typeof deadline === 'string' ? parseISO(deadline) : deadline) } catch { return false }
 }
 
+const INITIAL_FORM = { name: '', kana: '', phone: '', email: '', ca: '', status: '初回未対応', inflow: '', area: '', company: '', job: '', salary: '', hopeJob: '', hopeArea: '', hopeSalary: '', timing: '', note: '' }
+
 export function CustomerListClient() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -28,6 +30,10 @@ export function CustomerListClient() {
   const [caFilter, setCaFilter] = useState('')
   const [yomiFilter, setYomiFilter] = useState('')
   const [search, setSearch] = useState('')
+
+  const [showModal, setShowModal] = useState(false)
+  const [form, setForm] = useState(INITIAL_FORM)
+  const [saving, setSaving] = useState(false)
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
@@ -51,6 +57,22 @@ export function CustomerListClient() {
 
   useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      const res = await fetch('/api/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+      if (!res.ok) throw new Error('Failed')
+      setShowModal(false)
+      setForm(INITIAL_FORM)
+      await fetchCustomers()
+    } catch {
+      alert('登録に失敗しました')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   // Build CA options from loaded data
   const caOptions = Array.from(new Set(customers.map((c) => c.ca).filter((ca): ca is string => !!ca))).sort()
 
@@ -59,7 +81,7 @@ export function CustomerListClient() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-900">顧客一覧</h1>
-        <button className="flex items-center gap-1.5 bg-[#0070D2] hover:bg-[#005fb2] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+        <button onClick={() => setShowModal(true)} className="flex items-center gap-1.5 bg-[#0070D2] hover:bg-[#005fb2] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
           <Plus size={16} />
           新規登録
         </button>
@@ -184,6 +206,61 @@ export function CustomerListClient() {
           </div>
         )}
       </div>
+      {/* New Customer Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b flex items-center justify-between">
+              <h2 className="text-lg font-bold">新規顧客登録</h2>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+            </div>
+            <form onSubmit={handleCreate} className="p-5 space-y-3">
+              {[
+                { label: '氏名 *', key: 'name', required: true },
+                { label: 'フリガナ', key: 'kana' },
+                { label: '電話番号', key: 'phone' },
+                { label: 'メールアドレス', key: 'email' },
+                { label: '担当CA', key: 'ca' },
+                { label: '流入元', key: 'inflow' },
+                { label: '居住地', key: 'area' },
+                { label: '現職企業', key: 'company' },
+                { label: '現職職種', key: 'job' },
+                { label: '現在年収', key: 'salary' },
+                { label: '希望職種', key: 'hopeJob' },
+                { label: '希望勤務地', key: 'hopeArea' },
+                { label: '希望年収', key: 'hopeSalary' },
+                { label: '転職希望時期', key: 'timing' },
+              ].map(({ label, key, required }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                  <input
+                    type="text"
+                    required={required}
+                    value={form[key as keyof typeof form]}
+                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
+                <textarea
+                  value={form.note}
+                  onChange={(e) => setForm({ ...form, note: e.target.value })}
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 border border-gray-200 rounded-lg px-4 py-2 text-sm hover:bg-gray-50">キャンセル</button>
+                <button type="submit" disabled={saving} className="flex-1 bg-[#0070D2] hover:bg-[#005fb2] text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">
+                  {saving ? '登録中...' : '登録'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
