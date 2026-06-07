@@ -79,16 +79,18 @@ export async function POST(request: NextRequest) {
       const email = row.email?.toLowerCase() ?? ''
       const phone = row.phone ?? ''
 
-      const existing = await prisma.customer.findFirst({
-        where: {
-          OR: [
-            email ? { email } : { id: '' },
-            phone ? { phone } : { id: '' },
-            { name },
-          ].filter(c => Object.keys(c).length && !('id' in c)) as any,
-        },
-      })
-      if (existing) { skipped++; continue }
+      // メールか電話番号がある場合のみ重複チェック（名前だけでは弾かない）
+      if (email || phone) {
+        const existing = await prisma.customer.findFirst({
+          where: {
+            OR: [
+              ...(email ? [{ email }] : []),
+              ...(phone ? [{ phone }] : []),
+            ],
+          },
+        })
+        if (existing) { skipped++; continue }
+      }
 
       const data: any = {
         name,
