@@ -80,10 +80,17 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, preview: true, rows: rows.slice(0, 50), total: rows.length })
     }
 
+    // 同一CSVで複数行に同じメールが出る場合はシステムメールとして重複チェックから除外
+    const emailCounts = new Map<string, number>()
+    rows.forEach(r => { if (r.email) emailCounts.set(r.email.toLowerCase(), (emailCounts.get(r.email.toLowerCase()) ?? 0) + 1) })
+    const sharedEmails = new Set([...emailCounts.entries()].filter(([, n]) => n > 1).map(([e]) => e))
+
     let added = 0, skipped = 0
     for (const row of rows) {
       const name = row.name
-      const email = row.email?.toLowerCase() ?? ''
+      const rawEmail = row.email?.toLowerCase() ?? ''
+      // 複数行で使い回されているシステムメールは重複チェックに使わない
+      const email = sharedEmails.has(rawEmail) ? '' : rawEmail
       const phone = row.phone ?? ''
 
       // メールか電話番号がある場合のみ重複チェック（名前だけでは弾かない）
@@ -102,7 +109,7 @@ export async function POST(request: NextRequest) {
       const data: any = {
         name,
         kana: row.kana ?? '',
-        email,
+        email: rawEmail,
         phone,
         age: row.age ?? '',
         gender: row.gender ?? '',

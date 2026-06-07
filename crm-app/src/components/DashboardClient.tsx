@@ -90,8 +90,9 @@ export function DashboardClient() {
   const caRows = Array.from(caMap.entries()).sort((a, b) => b[1] - a[1])
 
   // ========== 月別ヨミ表 ==========
-  type YomiCustomer = Customer & { expectedCloseMonth?: string | null }
-  const yomiCustomers = (filtered as YomiCustomer[]).filter(c => c.expectedCloseMonth)
+  type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null }
+  // expectedCloseMonth または yomiRank があれば対象
+  const yomiCustomers = (filtered as YomiCustomer[]).filter(c => c.expectedCloseMonth || c.yomiRank)
 
   const thisMonth = format(new Date(), 'yyyy-MM')
   const futureMonths = Array.from({ length: 6 }, (_, i) => {
@@ -99,8 +100,10 @@ export function DashboardClient() {
     d.setMonth(d.getMonth() + i)
     return format(d, 'yyyy-MM')
   })
-  const dataMonths = [...new Set(yomiCustomers.map(c => c.expectedCloseMonth!))]
-  const allMonths = [...new Set([...futureMonths, ...dataMonths])].sort()
+  const dataMonths = [...new Set(yomiCustomers.map(c => c.expectedCloseMonth ?? '月未設定'))]
+  const hasNoMonth = yomiCustomers.some(c => !c.expectedCloseMonth)
+  const allMonths = [...new Set([...futureMonths, ...dataMonths.filter(m => m !== '月未設定')])].sort()
+  if (hasNoMonth) allMonths.push('月未設定')
 
   const YOMI_RANKS = [
     { rank: 'S', color: 'bg-purple-100 text-purple-700' },
@@ -111,15 +114,19 @@ export function DashboardClient() {
     { rank: '未設定', color: 'bg-gray-50 text-gray-400' },
   ]
 
+  function matchMonth(c: YomiCustomer, month: string) {
+    return month === '月未設定' ? !c.expectedCloseMonth : c.expectedCloseMonth === month
+  }
+
   function getMonthRankCount(month: string, rank: string) {
     return yomiCustomers.filter(c =>
-      c.expectedCloseMonth === month &&
+      matchMonth(c, month) &&
       (rank === '未設定' ? !c.yomiRank : c.yomiRank === rank)
     ).length
   }
 
   function getMonthCustomers(month: string) {
-    return yomiCustomers.filter(c => c.expectedCloseMonth === month)
+    return yomiCustomers.filter(c => matchMonth(c, month))
   }
 
   return (
@@ -145,7 +152,7 @@ export function DashboardClient() {
       <div className="bg-white rounded-xl shadow-sm p-5">
         <h2 className="font-bold text-gray-700 mb-4">月別ヨミ（受注予定月別）</h2>
         {allMonths.length === 0 ? (
-          <p className="text-gray-400 text-sm">受注予定月が設定された顧客がありません。顧客詳細ページで「受注予定月」を設定してください。</p>
+          <p className="text-gray-400 text-sm">ヨミランクまたは受注予定月が設定された顧客がありません。顧客詳細ページで設定してください。</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
