@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { format, isAfter, parseISO } from 'date-fns'
-import { Search, Plus } from 'lucide-react'
+import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
@@ -30,6 +30,8 @@ export function CustomerListClient() {
   const [caFilter, setCaFilter] = useState('')
   const [yomiFilter, setYomiFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState('updatedAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(INITIAL_FORM)
@@ -44,6 +46,8 @@ export function CustomerListClient() {
       if (caFilter) params.set('ca', caFilter)
       if (yomiFilter) params.set('yomi', yomiFilter)
       if (search) params.set('search', search)
+      params.set('sortBy', sortBy)
+      params.set('sortDir', sortDir)
       const res = await fetch(`/api/customers?${params}`)
       if (!res.ok) throw new Error('Failed')
       const data = await res.json() as Customer[]
@@ -53,7 +57,17 @@ export function CustomerListClient() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, caFilter, yomiFilter, search])
+  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir])
+
+  function toggleSort(col: string) {
+    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortBy(col); setSortDir('desc') }
+  }
+
+  function SortIcon({ col }: { col: string }) {
+    if (sortBy !== col) return <ArrowUpDown size={13} className="text-gray-400 inline ml-1" />
+    return sortDir === 'asc' ? <ArrowUp size={13} className="text-blue-500 inline ml-1" /> : <ArrowDown size={13} className="text-blue-500 inline ml-1" />
+  }
 
   useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
@@ -157,12 +171,12 @@ export function CustomerListClient() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">氏名</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">ステータス</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('name')}>氏名<SortIcon col="name" /></th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('status')}>ステータス<SortIcon col="status" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">担当CA</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">送客日</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('registeredAt')}>送客日<SortIcon col="registeredAt" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">次回アクション</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">次回期限</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('nextDeadline')}>次回期限<SortIcon col="nextDeadline" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">ヨミ</th>
               </tr>
             </thead>

@@ -14,7 +14,9 @@ export async function GET(request: NextRequest) {
     const yomiRank = params.get('yomi') ?? undefined
     const search = params.get('search') ?? undefined
 
-    const customers = await getCustomers({ status, ca, yomiRank, search })
+    const sortBy = params.get('sortBy') ?? undefined
+    const sortDir = params.get('sortDir') ?? undefined
+    const customers = await getCustomers({ status, ca, yomiRank, search, sortBy, sortDir })
     return Response.json(customers)
   } catch (e) {
     console.error(e)

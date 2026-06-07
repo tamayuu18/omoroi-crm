@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
-  ChevronLeft, Edit, Clock, CheckSquare, Users
+  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History } from '@/types'
 import { ALL_STATUSES } from '@/types'
@@ -88,6 +88,71 @@ function StatusChangeModal({ customer, onClose, onUpdate }: ModalProps) {
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
             キャンセル
           </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50"
+          >
+            {loading ? '更新中...' : '更新する'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
+  const [yomiRank, setYomiRank] = useState(customer.yomiRank ?? '')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    setLoading(true)
+    try {
+      await fetch(`/api/customers/${customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ yomiRank: yomiRank || null }),
+      })
+      onUpdate()
+      onClose()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-bold text-gray-900 mb-4">ヨミランク更新</h2>
+        <div className="flex gap-2 mb-6">
+          {['S', 'A', 'B', 'C', 'D'].map((r) => (
+            <button
+              key={r}
+              onClick={() => setYomiRank(r)}
+              className={cn(
+                'flex-1 py-2 rounded-lg text-sm font-bold border-2 transition-colors',
+                yomiRank === r
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              )}
+            >
+              {r}
+            </button>
+          ))}
+          <button
+            onClick={() => setYomiRank('')}
+            className={cn(
+              'flex-1 py-2 rounded-lg text-xs border-2 transition-colors',
+              yomiRank === ''
+                ? 'border-gray-400 bg-gray-100 text-gray-700'
+                : 'border-gray-200 text-gray-400 hover:border-gray-300'
+            )}
+          >
+            なし
+          </button>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
           <button
             onClick={handleSubmit}
             disabled={loading}
@@ -217,6 +282,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [loading, setLoading] = useState(true)
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [showYomiModal, setShowYomiModal] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -237,6 +303,13 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   }, [customerId])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  async function handleDelete() {
+    if (!customer) return
+    if (!confirm(`「${customer.name}」を削除しますか？この操作は取り消せません。`)) return
+    await fetch(`/api/customers/${customer.id}`, { method: 'DELETE' })
+    window.location.href = '/customers'
+  }
 
   async function toggleTaskStatus(task: Task) {
     const newStatus = task.status === '完了' ? '未完了' : '完了'
@@ -302,11 +375,25 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
               ステータス変更
             </button>
             <button
+              onClick={() => setShowYomiModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+            >
+              <Star size={14} />
+              ヨミ更新
+            </button>
+            <button
               onClick={() => setShowHistoryModal(true)}
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
             >
               <Clock size={14} />
               対応記録を追加
+            </button>
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={14} />
+              削除
             </button>
           </div>
         </div>
@@ -515,6 +602,13 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
         <StatusChangeModal
           customer={customer}
           onClose={() => setShowStatusModal(false)}
+          onUpdate={fetchAll}
+        />
+      )}
+      {showYomiModal && customer && (
+        <YomiModal
+          customer={customer}
+          onClose={() => setShowYomiModal(false)}
           onUpdate={fetchAll}
         />
       )}

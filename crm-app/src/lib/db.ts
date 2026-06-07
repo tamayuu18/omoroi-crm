@@ -3,7 +3,7 @@ import type { Customer, Task, Meeting, History } from '@prisma/client'
 
 export type { Customer, Task, Meeting, History }
 
-export async function getCustomers(filters?: { status?: string; ca?: string; yomiRank?: string; search?: string }) {
+export async function getCustomers(filters?: { status?: string; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string }) {
   const where: any = {}
   if (filters?.status) where.status = filters.status
   if (filters?.ca) where.ca = filters.ca
@@ -15,10 +15,16 @@ export async function getCustomers(filters?: { status?: string; ca?: string; yom
       { email: { contains: filters.search } },
     ]
   }
-  return prisma.customer.findMany({
-    where,
-    orderBy: { updatedAt: 'desc' },
-  })
+  const dir = filters?.sortDir === 'asc' ? 'asc' : 'desc'
+  const validSorts: Record<string, any> = {
+    name: { name: dir },
+    registeredAt: { registeredAt: dir },
+    updatedAt: { updatedAt: dir },
+    nextDeadline: { nextDeadline: dir },
+    status: { status: dir },
+  }
+  const orderBy = validSorts[filters?.sortBy ?? ''] ?? { updatedAt: 'desc' }
+  return prisma.customer.findMany({ where, orderBy })
 }
 
 export async function getCustomerById(id: string) {

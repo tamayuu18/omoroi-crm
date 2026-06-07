@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { addHistory } from '@/lib/db'
+import { addHistory, updateCustomer } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -17,6 +17,16 @@ export async function POST(request: NextRequest) {
       body.nextDeadline = new Date(body.nextDeadline)
     }
     const history = await addHistory(body)
+    // 次回アクション・期限を顧客レコードにも反映
+    if (body.customerId && (body.nextContent || body.nextDeadline)) {
+      await updateCustomer(body.customerId, {
+        nextAction: body.nextContent || undefined,
+        nextDeadline: body.nextDeadline || undefined,
+        lastContact: body.date || new Date(),
+      })
+    } else if (body.customerId) {
+      await updateCustomer(body.customerId, { lastContact: body.date || new Date() })
+    }
     return Response.json(history, { status: 201 })
   } catch (e) {
     console.error(e)

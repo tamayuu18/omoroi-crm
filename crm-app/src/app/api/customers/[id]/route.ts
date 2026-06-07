@@ -2,6 +2,7 @@ import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getCustomerById, updateCustomer } from '@/lib/db'
+import { prisma } from '@/lib/prisma'
 
 export async function GET(
   _req: NextRequest,
@@ -36,5 +37,25 @@ export async function PATCH(
   } catch (e) {
     console.error(e)
     return Response.json({ error: 'Failed to update customer' }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  ctx: RouteContext<'/api/customers/[id]'>
+) {
+  const session = await getServerSession(authOptions)
+  if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { id } = await ctx.params
+  try {
+    await prisma.history.deleteMany({ where: { customerId: id } })
+    await prisma.meeting.deleteMany({ where: { customerId: id } })
+    await prisma.task.deleteMany({ where: { customerId: id } })
+    await prisma.customer.delete({ where: { id } })
+    return Response.json({ ok: true })
+  } catch (e) {
+    console.error(e)
+    return Response.json({ error: 'Failed to delete customer' }, { status: 500 })
   }
 }
