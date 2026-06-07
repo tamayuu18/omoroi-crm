@@ -117,6 +117,9 @@ export async function GET() {
     `
     // マイグレーション: 新規カラム追加
     await prisma.$executeRaw`ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "expectedCloseMonth" TEXT`
+    await prisma.$executeRaw`ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "expectedRevenue" TEXT`
+    await prisma.$executeRaw`ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "feeRate" TEXT`
+    await prisma.$executeRaw`ALTER TABLE "History" ADD COLUMN IF NOT EXISTS "createdBy" TEXT`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Customer_status_idx" ON "Customer"("status")`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Customer_ca_idx" ON "Customer"("ca")`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Task_customerId_idx" ON "Task"("customerId")`

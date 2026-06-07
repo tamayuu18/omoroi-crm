@@ -1,4 +1,15 @@
-export type { Customer, Task, Meeting, History, Yomi } from '@prisma/client'
+import type { Customer as PrismaCustomer, Task, Meeting, History as PrismaHistory, Yomi } from '@prisma/client'
+
+export type { Task, Meeting, Yomi }
+
+export type Customer = PrismaCustomer & {
+  expectedRevenue?: string | null
+  feeRate?: string | null
+}
+
+export type History = PrismaHistory & {
+  createdBy?: string | null
+}
 
 export type CustomerStatus =
   | '新規送客'

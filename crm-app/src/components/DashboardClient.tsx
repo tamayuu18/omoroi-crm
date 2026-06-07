@@ -90,7 +90,7 @@ export function DashboardClient() {
   const caRows = Array.from(caMap.entries()).sort((a, b) => b[1] - a[1])
 
   // ========== 月別ヨミ表 ==========
-  type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null }
+  type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null; expectedRevenue?: string | null; feeRate?: string | null }
   // expectedCloseMonth または yomiRank があれば対象
   const yomiCustomers = (filtered as YomiCustomer[]).filter(c => c.expectedCloseMonth || c.yomiRank)
 
@@ -129,6 +129,16 @@ export function DashboardClient() {
     return yomiCustomers.filter(c => matchMonth(c, month))
   }
 
+  function getMonthRevenue(month: string) {
+    return yomiCustomers
+      .filter(c => matchMonth(c, month))
+      .reduce((sum, c) => {
+        const rev = parseFloat(c.expectedRevenue ?? '0') || 0
+        const fee = parseFloat(c.feeRate ?? '0') || 0
+        return sum + rev * fee / 100
+      }, 0)
+  }
+
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -163,6 +173,7 @@ export function DashboardClient() {
                     <th key={r.rank} className="text-center py-2 px-3 font-semibold text-gray-600">{r.rank}</th>
                   ))}
                   <th className="text-center py-2 px-3 font-semibold text-gray-600">合計</th>
+                  <th className="text-center py-2 px-3 font-semibold text-gray-600">売上見込</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -190,6 +201,9 @@ export function DashboardClient() {
                         )
                       })}
                       <td className="py-2 px-3 text-center font-bold text-gray-700">{total || '—'}</td>
+                      <td className="py-2 px-3 text-center text-sm text-gray-700">
+                        {(() => { const r = getMonthRevenue(month); return r > 0 ? `${Math.round(r)}万円` : '—' })()}
+                      </td>
                     </tr>
                   )
                 })}

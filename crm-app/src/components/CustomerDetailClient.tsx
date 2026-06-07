@@ -87,7 +87,10 @@ function StatusChangeModal({ customer, onClose, onUpdate }: ModalProps) {
 
 // ========== Yomi Modal ==========
 function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
-  const [yomiRank, setYomiRank] = useState(customer.yomiRank ?? '')
+  const c = customer as Customer & { expectedRevenue?: string | null; feeRate?: string | null }
+  const [yomiRank, setYomiRank] = useState(c.yomiRank ?? '')
+  const [expectedRevenue, setExpectedRevenue] = useState(c.expectedRevenue ?? '')
+  const [feeRate, setFeeRate] = useState(c.feeRate ?? '')
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit() {
@@ -96,7 +99,11 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
       await fetch(`/api/customers/${customer.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ yomiRank: yomiRank || null }),
+        body: JSON.stringify({
+          yomiRank: yomiRank || null,
+          expectedRevenue: expectedRevenue || null,
+          feeRate: feeRate || null,
+        }),
       })
       onUpdate()
       onClose()
@@ -106,8 +113,8 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">ヨミランク更新</h2>
-        <div className="flex gap-2 mb-6">
+        <h2 className="text-lg font-bold text-gray-900 mb-4">ヨミ更新</h2>
+        <div className="flex gap-2 mb-4">
           {['S', 'A', 'B', 'C', 'D'].map((r) => (
             <button key={r} onClick={() => setYomiRank(r)}
               className={cn('flex-1 py-2 rounded-lg text-sm font-bold border-2 transition-colors',
@@ -120,6 +127,18 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
               yomiRank === '' ? 'border-gray-400 bg-gray-100 text-gray-700' : 'border-gray-200 text-gray-400 hover:border-gray-300')}>
             なし
           </button>
+        </div>
+        <div className="space-y-3 mb-6">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">売上予定額（万円）</label>
+            <input type="number" value={expectedRevenue} onChange={e => setExpectedRevenue(e.target.value)}
+              placeholder="例: 500" className={inp} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">フィー率（%）</label>
+            <input type="number" value={feeRate} onChange={e => setFeeRate(e.target.value)}
+              placeholder="例: 30" className={inp} />
+          </div>
         </div>
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
@@ -449,7 +468,7 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <span className="font-medium text-gray-800">{h.type}</span>
           {h.result && <span className="text-gray-500 text-xs">— {h.result}</span>}
-          <span className="text-xs text-gray-400 ml-auto">{fmt(h.date)} / {h.ca}</span>
+          <span className="text-xs text-gray-400 ml-auto">{fmt(h.date)} / {h.ca}{h.createdBy && ` / 記録: ${h.createdBy}`}</span>
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button onClick={() => setEditing(true)} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-500">
               <Pencil size={12} />
@@ -650,6 +669,11 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
           <InfoRow icon={<MapPin size={14} />} label="希望勤務地" value={customer.hopeArea} />
           <InfoRow icon={<DollarSign size={14} />} label="希望年収" value={customer.hopeSalary && `${customer.hopeSalary}万円`} />
           <InfoRow icon={<Calendar size={14} />} label="転職希望時期" value={customer.timing} />
+
+          <h2 className="font-bold text-gray-700 border-b pb-2 pt-2">ヨミ情報</h2>
+          <InfoRow icon={<Star size={14} />} label="ヨミランク" value={customer.yomiRank} />
+          <InfoRow icon={<DollarSign size={14} />} label="売上予定額" value={(customer as any).expectedRevenue && `${(customer as any).expectedRevenue}万円`} />
+          <InfoRow icon={<DollarSign size={14} />} label="フィー率" value={(customer as any).feeRate && `${(customer as any).feeRate}%`} />
 
           <h2 className="font-bold text-gray-700 border-b pb-2 pt-2">その他</h2>
           <InfoRow icon={<Calendar size={14} />} label="流入元" value={customer.inflow} />

@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     if (body.nextDeadline && typeof body.nextDeadline === 'string') {
       body.nextDeadline = new Date(body.nextDeadline)
     }
+    body.createdBy = session.user?.name ?? null
     const history = await addHistory(body)
     // 次回アクション・期限を顧客レコードにも反映
     if (body.customerId && (body.nextContent || body.nextDeadline)) {
