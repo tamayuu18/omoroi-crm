@@ -14,7 +14,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    const status = typeof body.status === 'string' ? parseInt(body.status, 10) : body.status
+    const rawStatus = body.status
+    // status: 1/"confirmed"=確定, 2/"cancelled_by_host"=ホストキャンセル, 3/"cancelled_by_guest"=ゲストキャンセル
+    const status = typeof rawStatus === 'number' ? rawStatus
+      : rawStatus === 'confirmed' ? 1
+      : rawStatus === 'cancelled_by_host' ? 2
+      : rawStatus === 'cancelled_by_guest' ? 3
+      : parseInt(rawStatus, 10)
     const rawForm = body.form ?? []
     const form: any[] = typeof rawForm === 'string' ? (() => { try { return JSON.parse(rawForm) } catch { return [] } })() : Array.isArray(rawForm) ? rawForm : []
     const rawHosts = body.hosts ?? []
@@ -23,7 +29,8 @@ export async function POST(req: NextRequest) {
     // Zapierからフラットフィールドで来る場合のフォールバック
     const guestName = getFormValue(form, 'guest_name') || String(body.guest_name || '')
     const guestEmail = (getFormValue(form, 'guest_email') || String(body.guest_email || '')).toLowerCase()
-    const caName = hosts[0]?.name ?? String(body.host_name || body.ca_name || '')
+    const rawHostName = body.host_name || body.ca_name || ''
+    const caName = hosts[0]?.name ?? (Array.isArray(rawHostName) ? rawHostName[0] : String(rawHostName))
     const startDatetime = body.local_start_datetime ? new Date(body.local_start_datetime) : null
     const endDatetime = body.local_end_datetime ? new Date(body.local_end_datetime) : null
     const timerexId = String(body.id ?? '')
