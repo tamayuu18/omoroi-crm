@@ -9,9 +9,6 @@ import { CA_OPTIONS } from '@/lib/constants'
 import { statusColors } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
-// ヨミ判定ステータス（受注可能性あり）
-const YOMI_STATUSES = ['求人提案中', '応募意思確認中', '応募済み', '書類選考中', '一次面接予定', '一次面接結果待ち', '最終面接予定', '最終面接結果待ち', '内定', '承諾', '入社予定']
-const CLOSED_STATUSES = ['入社済み']
 
 function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number | string; color: string }) {
   return (
@@ -93,13 +90,9 @@ export function DashboardClient() {
   const caRows = Array.from(caMap.entries()).sort((a, b) => b[1] - a[1])
 
   // ========== 月別ヨミ表 ==========
-  // expectedCloseMonth がある顧客を月別 × ステータス別に集計
   type YomiCustomer = Customer & { expectedCloseMonth?: string | null }
-  const yomiCustomers = (filtered as YomiCustomer[]).filter(c =>
-    c.expectedCloseMonth && (YOMI_STATUSES.includes(c.status) || CLOSED_STATUSES.includes(c.status))
-  )
+  const yomiCustomers = (filtered as YomiCustomer[]).filter(c => c.expectedCloseMonth)
 
-  // 月リスト（今月から6ヶ月先まで + データにある月）
   const thisMonth = format(new Date(), 'yyyy-MM')
   const futureMonths = Array.from({ length: 6 }, (_, i) => {
     const d = new Date()
@@ -109,16 +102,20 @@ export function DashboardClient() {
   const dataMonths = [...new Set(yomiCustomers.map(c => c.expectedCloseMonth!))]
   const allMonths = [...new Set([...futureMonths, ...dataMonths])].sort()
 
-  // ステータスグループ
-  const YOMI_GROUPS = [
-    { label: '求人提案・応募', statuses: ['求人提案中', '応募意思確認中', '応募済み'], color: 'bg-blue-100 text-blue-700' },
-    { label: '選考中', statuses: ['書類選考中', '一次面接予定', '一次面接結果待ち', '最終面接予定', '最終面接結果待ち'], color: 'bg-yellow-100 text-yellow-700' },
-    { label: '内定・承諾', statuses: ['内定', '承諾', '入社予定'], color: 'bg-green-100 text-green-700' },
-    { label: '入社済み', statuses: ['入社済み'], color: 'bg-gray-100 text-gray-700' },
+  const YOMI_RANKS = [
+    { rank: 'S', color: 'bg-purple-100 text-purple-700' },
+    { rank: 'A', color: 'bg-blue-100 text-blue-700' },
+    { rank: 'B', color: 'bg-green-100 text-green-700' },
+    { rank: 'C', color: 'bg-yellow-100 text-yellow-700' },
+    { rank: 'D', color: 'bg-gray-100 text-gray-600' },
+    { rank: '未設定', color: 'bg-gray-50 text-gray-400' },
   ]
 
-  function getMonthCount(month: string, statuses: string[]) {
-    return yomiCustomers.filter(c => c.expectedCloseMonth === month && statuses.includes(c.status)).length
+  function getMonthRankCount(month: string, rank: string) {
+    return yomiCustomers.filter(c =>
+      c.expectedCloseMonth === month &&
+      (rank === '未設定' ? !c.yomiRank : c.yomiRank === rank)
+    ).length
   }
 
   function getMonthCustomers(month: string) {
@@ -155,8 +152,8 @@ export function DashboardClient() {
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-2 pr-4 font-semibold text-gray-600 w-24">月</th>
-                  {YOMI_GROUPS.map(g => (
-                    <th key={g.label} className="text-center py-2 px-3 font-semibold text-gray-600">{g.label}</th>
+                  {YOMI_RANKS.map(r => (
+                    <th key={r.rank} className="text-center py-2 px-3 font-semibold text-gray-600">{r.rank}</th>
                   ))}
                   <th className="text-center py-2 px-3 font-semibold text-gray-600">合計</th>
                 </tr>
@@ -171,12 +168,12 @@ export function DashboardClient() {
                         {month.replace('-', '/')}
                         {isCurrentMonth && <span className="ml-1 text-xs text-blue-500">今月</span>}
                       </td>
-                      {YOMI_GROUPS.map(g => {
-                        const count = getMonthCount(month, g.statuses)
+                      {YOMI_RANKS.map(r => {
+                        const count = getMonthRankCount(month, r.rank)
                         return (
-                          <td key={g.label} className="py-2 px-3 text-center">
+                          <td key={r.rank} className="py-2 px-3 text-center">
                             {count > 0 ? (
-                              <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs font-medium', g.color)}>
+                              <span className={cn('inline-block px-2 py-0.5 rounded-full text-xs font-medium', r.color)}>
                                 {count}
                               </span>
                             ) : (
