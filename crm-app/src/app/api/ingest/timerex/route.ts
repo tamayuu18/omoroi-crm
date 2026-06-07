@@ -41,16 +41,32 @@ export async function POST(req: NextRequest) {
 
     if (status === 1) {
       // 予約確定: 顧客を upsert して面談を登録
-      let customer = guestEmail
-        ? await prisma.customer.findFirst({ where: { email: guestEmail } })
-        : await prisma.customer.findFirst({ where: { name: guestName } })
+      // 同一メールが複数顧客に使われているシステムメールかチェック
+      let isSharedEmail = false
+      if (guestEmail) {
+        const emailCount = await prisma.customer.count({ where: { email: guestEmail } })
+        isSharedEmail = emailCount > 1
+      }
+
+      let customer = null
+      // システムメールでなければメールで検索、システムメールまたは空なら名前で検索
+      if (guestEmail && !isSharedEmail) {
+        customer = await prisma.customer.findFirst({ where: { email: guestEmail } })
+      }
+      if (!customer && guestName) {
+        // 名前で検索（複数ヒットの場合は最新登録を優先）
+        customer = await prisma.customer.findFirst({
+          where: { name: guestName },
+          orderBy: { registeredAt: 'desc' },
+        })
+      }
 
       if (!customer) {
         customer = await prisma.customer.create({
           data: {
             id: generateId(),
             name: guestName,
-            email: guestEmail,
+            email: isSharedEmail ? '' : guestEmail,
             ca: caName,
             inflow: 'TimeRex',
             status: '面談予約済み',
@@ -88,9 +104,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'ok', action: 'created', customerId: customer.id })
     } else if (status === 2 || status === 3) {
       // キャンセル: 対応する面談をキャンセルに更新
-      const customer = guestEmail
-        ? await prisma.customer.findFirst({ where: { email: guestEmail } })
-        : await prisma.customer.findFirst({ where: { name: guestName } })
+      let cancelCustomer = null
+      if (guestEmail) {
+        const emailCount = await prisma.customer.count({ where: { email: guestEmail } })
+        if (emailCount === 1) cancelCustomer = await prisma.customer.findFirst({ where: { email: guestEmail } })
+      }
+      if (!cancelCustomer && guestName) {
+        cancelCustomer = await prisma.customer.findFirst({
+          where: { name: guestName },
+          orderBy: { registeredAt: 'desc' },
+        })
+      }
+      const customer = cancelCustomer
 
       if (customer && startDatetime) {
         await prisma.meeting.updateMany({
