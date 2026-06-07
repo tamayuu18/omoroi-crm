@@ -33,6 +33,7 @@ model Customer {
   nextAction   String?
   nextDeadline DateTime?
   lastContact  DateTime?
+  expectedCloseMonth String?
   note         String?
 
   tasks    Task[]

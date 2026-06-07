@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History } from '@/types'
 import { ALL_STATUSES } from '@/types'
+import { CA_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS } from '@/lib/constants'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
@@ -133,11 +134,6 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
 }
 
 // ========== Edit Info Modal ==========
-const GENDER_OPTIONS = ['', '男性', '女性', 'その他']
-const TIMING_OPTIONS = ['', 'すぐにでも', '1ヶ月以内', '3ヶ月以内', '半年以内', '1年以内', '時期未定']
-const INFLOW_OPTIONS = ['', 'Lreach', 'TimeRex', '紹介', 'HP', 'SNS', 'その他']
-const PREF_OPTIONS = ['', '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県', '海外']
-
 function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
   const [form, setForm] = useState({
     name: customer.name ?? '',
@@ -156,6 +152,7 @@ function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
     timing: customer.timing ?? '',
     inflow: customer.inflow ?? '',
     ca: customer.ca ?? '',
+    expectedCloseMonth: (customer as any).expectedCloseMonth ?? '',
     note: customer.note ?? '',
   })
   const [loading, setLoading] = useState(false)
@@ -194,18 +191,26 @@ function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
           <Row label="年齢"><input value={form.age} onChange={f('age')} placeholder="例: 28" className={inp} /></Row>
           <Row label="性別">
             <select value={form.gender} onChange={f('gender')} className={inp}>
-              {GENDER_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+              <option value="">— 選択 —</option>
+              {GENDER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </Row>
-          <Row label="担当CA"><input value={form.ca} onChange={f('ca')} className={inp} /></Row>
+          <Row label="担当CA">
+            <select value={form.ca} onChange={f('ca')} className={inp}>
+              <option value="">— 選択 —</option>
+              {CA_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Row>
           <Row label="流入元">
             <select value={form.inflow} onChange={f('inflow')} className={inp}>
-              {INFLOW_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+              <option value="">— 選択 —</option>
+              {INFLOW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </Row>
           <Row label="居住地">
             <select value={form.area} onChange={f('area')} className={inp}>
-              {PREF_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+              <option value="">— 選択 —</option>
+              {PREF_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </Row>
           <Row label="現職企業"><input value={form.company} onChange={f('company')} className={inp} /></Row>
@@ -214,14 +219,19 @@ function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
           <Row label="希望職種"><input value={form.hopeJob} onChange={f('hopeJob')} className={inp} /></Row>
           <Row label="希望勤務地">
             <select value={form.hopeArea} onChange={f('hopeArea')} className={inp}>
-              {PREF_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+              <option value="">— 選択 —</option>
+              {PREF_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </Row>
           <Row label="希望年収（万円）"><input value={form.hopeSalary} onChange={f('hopeSalary')} placeholder="例: 500" className={inp} /></Row>
           <Row label="転職希望時期">
             <select value={form.timing} onChange={f('timing')} className={inp}>
-              {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+              <option value="">— 選択 —</option>
+              {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
+          </Row>
+          <Row label="受注予定月">
+            <input type="month" value={form.expectedCloseMonth} onChange={f('expectedCloseMonth')} className={inp} />
           </Row>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">備考</label>

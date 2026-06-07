@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { format, isAfter, parseISO } from 'date-fns'
-import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
 import { ALL_STATUSES } from '@/types'
+import { CA_OPTIONS, INFLOW_OPTIONS, PREF_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS } from '@/lib/constants'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
@@ -19,23 +20,28 @@ function isOverdue(deadline: Date | string | null | undefined) {
   try { return isAfter(new Date(), typeof deadline === 'string' ? parseISO(deadline) : deadline) } catch { return false }
 }
 
-const INITIAL_FORM = { name: '', kana: '', phone: '', email: '', ca: '', status: '初回未対応', inflow: '', area: '', company: '', job: '', salary: '', hopeJob: '', hopeArea: '', hopeSalary: '', timing: '', note: '' }
+const inp = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const INITIAL_FORM = {
+  name: '', kana: '', phone: '', email: '', ca: '', gender: '', status: '初回未対応',
+  inflow: '', area: '', company: '', job: '', salary: '', hopeJob: '', hopeArea: '',
+  hopeSalary: '', timing: '', expectedCloseMonth: '', note: ''
+}
 
 export function CustomerListClient() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
   const [statusFilter, setStatusFilter] = useState('')
   const [caFilter, setCaFilter] = useState('')
   const [yomiFilter, setYomiFilter] = useState('')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('updatedAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(INITIAL_FORM)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
@@ -50,14 +56,15 @@ export function CustomerListClient() {
       params.set('sortDir', sortDir)
       const res = await fetch(`/api/customers?${params}`)
       if (!res.ok) throw new Error('Failed')
-      const data = await res.json() as Customer[]
-      setCustomers(data)
+      setCustomers(await res.json() as Customer[])
     } catch {
       setError('顧客データの取得に失敗しました')
     } finally {
       setLoading(false)
     }
   }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir])
+
+  useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
   function toggleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -69,13 +76,15 @@ export function CustomerListClient() {
     return sortDir === 'asc' ? <ArrowUp size={13} className="text-blue-500 inline ml-1" /> : <ArrowDown size={13} className="text-blue-500 inline ml-1" />
   }
 
-  useEffect(() => { fetchCustomers() }, [fetchCustomers])
-
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
-      const res = await fetch('/api/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
       if (!res.ok) throw new Error('Failed')
       setShowModal(false)
       setForm(INITIAL_FORM)
@@ -87,18 +96,56 @@ export function CustomerListClient() {
     }
   }
 
-  // Build CA options from loaded data
-  const caOptions = Array.from(new Set(customers.map((c) => c.ca).filter((ca): ca is string => !!ca))).sort()
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const res = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: text,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      alert(`✅ インポート完了\n追加: ${data.added}件\nスキップ(重複): ${data.skipped}件`)
+      await fetchCustomers()
+    } catch (err) {
+      alert(`❌ エラー: ${err}`)
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  function f(key: keyof typeof form) {
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setForm(prev => ({ ...prev, [key]: e.target.value }))
+  }
 
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-900">顧客一覧</h1>
-        <button onClick={() => setShowModal(true)} className="flex items-center gap-1.5 bg-[#0070D2] hover:bg-[#005fb2] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-          <Plus size={16} />
-          新規登録
-        </button>
+        <div className="flex gap-2">
+          <input ref={fileRef} type="file" accept=".csv" onChange={handleImport} className="hidden" />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-1.5 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            <Upload size={15} />
+            {importing ? 'インポート中...' : 'CSVインポート'}
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-1.5 bg-[#0070D2] hover:bg-[#005fb2] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus size={16} />新規登録
+          </button>
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -113,40 +160,23 @@ export function CustomerListClient() {
             className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">すべてのステータス</option>
-          {ALL_STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
+          {ALL_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select
-          value={caFilter}
-          onChange={(e) => setCaFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
+        <select value={caFilter} onChange={(e) => setCaFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">すべての担当CA</option>
-          {caOptions.map((ca) => (
-            <option key={ca} value={ca}>{ca}</option>
-          ))}
+          {CA_OPTIONS.map((ca) => <option key={ca} value={ca}>{ca}</option>)}
         </select>
-        <select
-          value={yomiFilter}
-          onChange={(e) => setYomiFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
+        <select value={yomiFilter} onChange={(e) => setYomiFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">ヨミランク</option>
-          {['S', 'A', 'B', 'C', 'D'].map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
+          {['S', 'A', 'B', 'C', 'D'].map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
-        <button
-          onClick={fetchCustomers}
-          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition-colors"
-        >
+        <button onClick={fetchCustomers}
+          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition-colors">
           検索
         </button>
       </div>
@@ -156,17 +186,13 @@ export function CustomerListClient() {
         {loading ? (
           <div className="p-12 text-center text-gray-500">
             <div className="animate-pulse space-y-3">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="h-10 bg-gray-100 rounded" />
-              ))}
+              {[...Array(8)].map((_, i) => <div key={i} className="h-10 bg-gray-100 rounded" />)}
             </div>
           </div>
         ) : error ? (
           <div className="p-12 text-center text-red-500">{error}</div>
         ) : customers.length === 0 ? (
-          <div className="p-12 text-center text-gray-400">
-            <p>該当する顧客が見つかりません</p>
-          </div>
+          <div className="p-12 text-center text-gray-400"><p>該当する顧客が見つかりません</p></div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
@@ -184,20 +210,15 @@ export function CustomerListClient() {
               {customers.map((c) => {
                 const overdue = isOverdue(c.nextDeadline)
                 return (
-                  <tr
-                    key={c.id}
-                    className="hover:bg-blue-50 cursor-pointer transition-colors"
-                    onClick={() => { window.location.href = `/customers/${c.id}` }}
-                  >
+                  <tr key={c.id} className="hover:bg-blue-50 cursor-pointer transition-colors"
+                    onClick={() => { window.location.href = `/customers/${c.id}` }}>
                     <td className="px-4 py-3 font-medium text-gray-900">
                       <Link href={`/customers/${c.id}`} className="hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
                         {c.name}
                       </Link>
                       {c.kana && <div className="text-xs text-gray-400">{c.kana}</div>}
                     </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={c.status} />
-                    </td>
+                    <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
                     <td className="px-4 py-3 text-gray-700">{c.ca}</td>
                     <td className="px-4 py-3 text-gray-500">{formatDate(c.registeredAt)}</td>
                     <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate">{c.nextAction}</td>
@@ -205,9 +226,7 @@ export function CustomerListClient() {
                       {formatDate(c.nextDeadline)}
                       {overdue && <span className="ml-1 text-xs">(!)</span>}
                     </td>
-                    <td className="px-4 py-3">
-                      <YomiRankBadge rank={c.yomiRank} />
-                    </td>
+                    <td className="px-4 py-3"><YomiRankBadge rank={c.yomiRank} /></td>
                   </tr>
                 )
               })}
@@ -215,56 +234,70 @@ export function CustomerListClient() {
           </table>
         )}
         {!loading && !error && customers.length > 0 && (
-          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">
-            {customers.length}件
-          </div>
+          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{customers.length}件</div>
         )}
       </div>
+
       {/* New Customer Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b flex items-center justify-between">
+            <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white">
               <h2 className="text-lg font-bold">新規顧客登録</h2>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
             </div>
             <form onSubmit={handleCreate} className="p-5 space-y-3">
-              {[
-                { label: '氏名 *', key: 'name', required: true },
-                { label: 'フリガナ', key: 'kana' },
-                { label: '電話番号', key: 'phone' },
-                { label: 'メールアドレス', key: 'email' },
-                { label: '担当CA', key: 'ca' },
-                { label: '流入元', key: 'inflow' },
-                { label: '居住地', key: 'area' },
-                { label: '現職企業', key: 'company' },
-                { label: '現職職種', key: 'job' },
-                { label: '現在年収', key: 'salary' },
-                { label: '希望職種', key: 'hopeJob' },
-                { label: '希望勤務地', key: 'hopeArea' },
-                { label: '希望年収', key: 'hopeSalary' },
-                { label: '転職希望時期', key: 'timing' },
-              ].map(({ label, key, required }) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                  <input
-                    type="text"
-                    required={required}
-                    value={form[key as keyof typeof form]}
-                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              ))}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">備考</label>
-                <textarea
-                  value={form.note}
-                  onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  rows={3}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+              <F label="氏名 *"><input required value={form.name} onChange={f('name')} className={inp} /></F>
+              <F label="フリガナ"><input value={form.kana} onChange={f('kana')} className={inp} /></F>
+              <F label="電話番号"><input value={form.phone} onChange={f('phone')} className={inp} /></F>
+              <F label="メールアドレス"><input type="email" value={form.email} onChange={f('email')} className={inp} /></F>
+              <F label="担当CA">
+                <select value={form.ca} onChange={f('ca')} className={inp}>
+                  <option value="">— 選択 —</option>
+                  {CA_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </F>
+              <F label="流入元">
+                <select value={form.inflow} onChange={f('inflow')} className={inp}>
+                  <option value="">— 選択 —</option>
+                  {INFLOW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </F>
+              <F label="性別">
+                <select value={form.gender} onChange={f('gender')} className={inp}>
+                  <option value="">— 選択 —</option>
+                  {GENDER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </F>
+              <F label="居住地">
+                <select value={form.area} onChange={f('area')} className={inp}>
+                  <option value="">— 選択 —</option>
+                  {PREF_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </F>
+              <F label="現職企業"><input value={form.company} onChange={f('company')} className={inp} /></F>
+              <F label="現職職種"><input value={form.job} onChange={f('job')} className={inp} /></F>
+              <F label="現在年収（万円）"><input value={form.salary} onChange={f('salary')} placeholder="例: 400" className={inp} /></F>
+              <F label="希望職種"><input value={form.hopeJob} onChange={f('hopeJob')} className={inp} /></F>
+              <F label="希望勤務地">
+                <select value={form.hopeArea} onChange={f('hopeArea')} className={inp}>
+                  <option value="">— 選択 —</option>
+                  {PREF_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </F>
+              <F label="希望年収（万円）"><input value={form.hopeSalary} onChange={f('hopeSalary')} placeholder="例: 500" className={inp} /></F>
+              <F label="転職希望時期">
+                <select value={form.timing} onChange={f('timing')} className={inp}>
+                  <option value="">— 選択 —</option>
+                  {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </F>
+              <F label="受注予定月">
+                <input type="month" value={form.expectedCloseMonth} onChange={f('expectedCloseMonth')} className={inp} />
+              </F>
+              <F label="備考">
+                <textarea value={form.note} onChange={f('note')} rows={3} className={inp + ' resize-none'} />
+              </F>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 border border-gray-200 rounded-lg px-4 py-2 text-sm hover:bg-gray-50">キャンセル</button>
                 <button type="submit" disabled={saving} className="flex-1 bg-[#0070D2] hover:bg-[#005fb2] text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">
@@ -275,6 +308,21 @@ export function CustomerListClient() {
           </div>
         </div>
       )}
+
+      {/* CSV format hint */}
+      <p className="mt-2 text-xs text-gray-400">
+        CSVインポート: スプレッドシートを「ファイル→ダウンロード→CSV」で書き出してアップロード。
+        ヘッダー行に「氏名」「電話番号」「担当CA」「流入元」「受注予定月」などを含めてください。
+      </p>
+    </div>
+  )
+}
+
+function F({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      {children}
     </div>
   )
 }

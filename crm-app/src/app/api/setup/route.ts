@@ -115,6 +115,8 @@ export async function GET() {
         CONSTRAINT "Yomi_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE
       )
     `
+    // マイグレーション: 新規カラム追加
+    await prisma.$executeRaw`ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "expectedCloseMonth" TEXT`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Customer_status_idx" ON "Customer"("status")`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Customer_ca_idx" ON "Customer"("ca")`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Task_customerId_idx" ON "Task"("customerId")`
