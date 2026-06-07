@@ -16,13 +16,14 @@ export async function POST(req: NextRequest) {
 
     const status = typeof body.status === 'string' ? parseInt(body.status, 10) : body.status
     const rawForm = body.form ?? []
-    const form: any[] = typeof rawForm === 'string' ? JSON.parse(rawForm) : Array.isArray(rawForm) ? rawForm : []
+    const form: any[] = typeof rawForm === 'string' ? (() => { try { return JSON.parse(rawForm) } catch { return [] } })() : Array.isArray(rawForm) ? rawForm : []
     const rawHosts = body.hosts ?? []
-    const hosts: any[] = typeof rawHosts === 'string' ? JSON.parse(rawHosts) : Array.isArray(rawHosts) ? rawHosts : []
+    const hosts: any[] = typeof rawHosts === 'string' ? (() => { try { return JSON.parse(rawHosts) } catch { return [] } })() : Array.isArray(rawHosts) ? rawHosts : []
 
+    // Zapierからフラットフィールドで来る場合のフォールバック
     const guestName = getFormValue(form, 'guest_name') || String(body.guest_name || '')
     const guestEmail = (getFormValue(form, 'guest_email') || String(body.guest_email || '')).toLowerCase()
-    const caName = hosts[0]?.name ?? ''
+    const caName = hosts[0]?.name ?? String(body.host_name || body.ca_name || '')
     const startDatetime = body.local_start_datetime ? new Date(body.local_start_datetime) : null
     const endDatetime = body.local_end_datetime ? new Date(body.local_end_datetime) : null
     const timerexId = String(body.id ?? '')
