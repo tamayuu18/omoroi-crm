@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
-  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star
+  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History } from '@/types'
 import { ALL_STATUSES } from '@/types'
@@ -17,12 +17,11 @@ function fmt(d: Date | string | null | undefined) {
   try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd') } catch { return String(d) }
 }
 
-function fmtDatetime(d: Date | string | null | undefined) {
-  if (!d) return '—'
-  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd HH:mm') } catch { return String(d) }
+function fmtInput(d: Date | string | null | undefined) {
+  if (!d) return ''
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy-MM-dd') } catch { return '' }
 }
 
-// Pipeline stages for progress bar
 const PIPELINE_STAGES = [
   '新規送客', '初回連絡済み', '面談予約済み', '面談実施済み',
   '求人提案中', '応募済み', '書類選考中', '一次面接予定',
@@ -30,11 +29,9 @@ const PIPELINE_STAGES = [
 ]
 
 function getStageIndex(status: string) {
-  const idx = PIPELINE_STAGES.indexOf(status)
-  return idx === -1 ? -1 : idx
+  return PIPELINE_STAGES.indexOf(status)
 }
 
-// History icon
 function historyIcon(type: string | null | undefined) {
   if (!type) return '📝'
   if (type.includes('電話')) return '📞'
@@ -49,6 +46,7 @@ interface ModalProps {
   onUpdate: () => void
 }
 
+// ========== Status Modal ==========
 function StatusChangeModal({ customer, onClose, onUpdate }: ModalProps) {
   const [status, setStatus] = useState(customer.status)
   const [loading, setLoading] = useState(false)
@@ -63,36 +61,21 @@ function StatusChangeModal({ customer, onClose, onUpdate }: ModalProps) {
       })
       onUpdate()
       onClose()
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-4">ステータス変更</h2>
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">新しいステータス</label>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as typeof status)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {ALL_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
+        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {ALL_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
         <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
-            キャンセル
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50"
-          >
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
+          <button onClick={handleSubmit} disabled={loading}
+            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50">
             {loading ? '更新中...' : '更新する'}
           </button>
         </div>
@@ -101,6 +84,7 @@ function StatusChangeModal({ customer, onClose, onUpdate }: ModalProps) {
   )
 }
 
+// ========== Yomi Modal ==========
 function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
   const [yomiRank, setYomiRank] = useState(customer.yomiRank ?? '')
   const [loading, setLoading] = useState(false)
@@ -115,9 +99,7 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
       })
       onUpdate()
       onClose()
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
@@ -126,38 +108,22 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
         <h2 className="text-lg font-bold text-gray-900 mb-4">ヨミランク更新</h2>
         <div className="flex gap-2 mb-6">
           {['S', 'A', 'B', 'C', 'D'].map((r) => (
-            <button
-              key={r}
-              onClick={() => setYomiRank(r)}
-              className={cn(
-                'flex-1 py-2 rounded-lg text-sm font-bold border-2 transition-colors',
-                yomiRank === r
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
-              )}
-            >
+            <button key={r} onClick={() => setYomiRank(r)}
+              className={cn('flex-1 py-2 rounded-lg text-sm font-bold border-2 transition-colors',
+                yomiRank === r ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:border-gray-300')}>
               {r}
             </button>
           ))}
-          <button
-            onClick={() => setYomiRank('')}
-            className={cn(
-              'flex-1 py-2 rounded-lg text-xs border-2 transition-colors',
-              yomiRank === ''
-                ? 'border-gray-400 bg-gray-100 text-gray-700'
-                : 'border-gray-200 text-gray-400 hover:border-gray-300'
-            )}
-          >
+          <button onClick={() => setYomiRank('')}
+            className={cn('flex-1 py-2 rounded-lg text-xs border-2 transition-colors',
+              yomiRank === '' ? 'border-gray-400 bg-gray-100 text-gray-700' : 'border-gray-200 text-gray-400 hover:border-gray-300')}>
             なし
           </button>
         </div>
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50"
-          >
+          <button onClick={handleSubmit} disabled={loading}
+            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50">
             {loading ? '更新中...' : '更新する'}
           </button>
         </div>
@@ -166,6 +132,125 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
   )
 }
 
+// ========== Edit Info Modal ==========
+const GENDER_OPTIONS = ['', '男性', '女性', 'その他']
+const TIMING_OPTIONS = ['', 'すぐにでも', '1ヶ月以内', '3ヶ月以内', '半年以内', '1年以内', '時期未定']
+const INFLOW_OPTIONS = ['', 'Lreach', 'TimeRex', '紹介', 'HP', 'SNS', 'その他']
+const PREF_OPTIONS = ['', '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県', '海外']
+
+function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
+  const [form, setForm] = useState({
+    name: customer.name ?? '',
+    kana: customer.kana ?? '',
+    phone: customer.phone ?? '',
+    email: customer.email ?? '',
+    age: customer.age ?? '',
+    gender: customer.gender ?? '',
+    area: customer.area ?? '',
+    company: customer.company ?? '',
+    job: customer.job ?? '',
+    salary: customer.salary ?? '',
+    hopeJob: customer.hopeJob ?? '',
+    hopeArea: customer.hopeArea ?? '',
+    hopeSalary: customer.hopeSalary ?? '',
+    timing: customer.timing ?? '',
+    inflow: customer.inflow ?? '',
+    ca: customer.ca ?? '',
+    note: customer.note ?? '',
+  })
+  const [loading, setLoading] = useState(false)
+
+  function f(key: keyof typeof form) {
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setForm(prev => ({ ...prev, [key]: e.target.value }))
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      await fetch(`/api/customers/${customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      onUpdate()
+      onClose()
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white">
+          <h2 className="text-lg font-bold">基本情報を編集</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <Row label="氏名 *"><input required value={form.name} onChange={f('name')} className={inp} /></Row>
+          <Row label="フリガナ"><input value={form.kana} onChange={f('kana')} className={inp} /></Row>
+          <Row label="電話番号"><input value={form.phone} onChange={f('phone')} className={inp} /></Row>
+          <Row label="メールアドレス"><input type="email" value={form.email} onChange={f('email')} className={inp} /></Row>
+          <Row label="年齢"><input value={form.age} onChange={f('age')} placeholder="例: 28" className={inp} /></Row>
+          <Row label="性別">
+            <select value={form.gender} onChange={f('gender')} className={inp}>
+              {GENDER_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+            </select>
+          </Row>
+          <Row label="担当CA"><input value={form.ca} onChange={f('ca')} className={inp} /></Row>
+          <Row label="流入元">
+            <select value={form.inflow} onChange={f('inflow')} className={inp}>
+              {INFLOW_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+            </select>
+          </Row>
+          <Row label="居住地">
+            <select value={form.area} onChange={f('area')} className={inp}>
+              {PREF_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+            </select>
+          </Row>
+          <Row label="現職企業"><input value={form.company} onChange={f('company')} className={inp} /></Row>
+          <Row label="現職職種"><input value={form.job} onChange={f('job')} className={inp} /></Row>
+          <Row label="現在年収（万円）"><input value={form.salary} onChange={f('salary')} placeholder="例: 400" className={inp} /></Row>
+          <Row label="希望職種"><input value={form.hopeJob} onChange={f('hopeJob')} className={inp} /></Row>
+          <Row label="希望勤務地">
+            <select value={form.hopeArea} onChange={f('hopeArea')} className={inp}>
+              {PREF_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+            </select>
+          </Row>
+          <Row label="希望年収（万円）"><input value={form.hopeSalary} onChange={f('hopeSalary')} placeholder="例: 500" className={inp} /></Row>
+          <Row label="転職希望時期">
+            <select value={form.timing} onChange={f('timing')} className={inp}>
+              {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+            </select>
+          </Row>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">備考</label>
+            <textarea value={form.note} onChange={f('note')} rows={3} className={inp + ' resize-none'} />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-200 rounded-lg px-4 py-2 text-sm hover:bg-gray-50">キャンセル</button>
+            <button type="submit" disabled={loading}
+              className="flex-1 bg-[#0070D2] text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50">
+              {loading ? '保存中...' : '保存する'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+const inp = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+// ========== Add History Modal ==========
 function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
   const [type, setType] = useState('電話')
   const [result, setResult] = useState('')
@@ -185,18 +270,12 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
           name: customer.name,
           ca: customer.ca,
           date: new Date().toISOString().split('T')[0],
-          type,
-          result,
-          content,
-          nextContent,
-          nextDeadline,
+          type, result, content, nextContent, nextDeadline,
         }),
       })
       onUpdate()
       onClose()
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
@@ -204,67 +283,29 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-4">対応記録を追加</h2>
         <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">対応種別</label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {['電話', 'メール', '面談', 'その他'].map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+          <Row label="対応種別">
+            <select value={type} onChange={(e) => setType(e.target.value)} className={inp}>
+              {['電話', 'メール', '面談', 'その他'].map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">対応結果</label>
-            <input
-              type="text"
-              value={result}
-              onChange={(e) => setResult(e.target.value)}
-              placeholder="例: 折り返し約束"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">対応内容 *</label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={4}
-              placeholder="対応内容を記入..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">次回予定</label>
-            <input
-              type="text"
-              value={nextContent}
-              onChange={(e) => setNextContent(e.target.value)}
-              placeholder="次回の対応内容"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">次回期限</label>
-            <input
-              type="date"
-              value={nextDeadline}
-              onChange={(e) => setNextDeadline(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          </Row>
+          <Row label="対応結果">
+            <input value={result} onChange={(e) => setResult(e.target.value)} placeholder="例: 折り返し約束" className={inp} />
+          </Row>
+          <Row label="対応内容 *">
+            <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4}
+              placeholder="対応内容を記入..." className={inp + ' resize-none'} />
+          </Row>
+          <Row label="次回予定">
+            <input value={nextContent} onChange={(e) => setNextContent(e.target.value)} placeholder="次回の対応内容" className={inp} />
+          </Row>
+          <Row label="次回期限">
+            <input type="date" value={nextDeadline} onChange={(e) => setNextDeadline(e.target.value)} className={inp} />
+          </Row>
         </div>
         <div className="flex gap-2 justify-end mt-4">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
-            キャンセル
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading || !content}
-            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50"
-          >
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
+          <button onClick={handleSubmit} disabled={loading || !content}
+            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50">
             {loading ? '保存中...' : '保存する'}
           </button>
         </div>
@@ -273,16 +314,103 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
   )
 }
 
+// ========== Inline History Item ==========
+function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({
+    type: h.type ?? '電話',
+    result: h.result ?? '',
+    content: h.content ?? '',
+    nextContent: h.nextContent ?? '',
+    nextDeadline: fmtInput(h.nextDeadline),
+  })
+  const [loading, setLoading] = useState(false)
+
+  async function handleSave() {
+    setLoading(true)
+    try {
+      await fetch(`/api/history/item/${h.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      onUpdate()
+      setEditing(false)
+    } finally { setLoading(false) }
+  }
+
+  async function handleDelete() {
+    if (!confirm('この対応記録を削除しますか？')) return
+    await fetch(`/api/history/item/${h.id}`, { method: 'DELETE' })
+    onUpdate()
+  }
+
+  if (editing) {
+    return (
+      <div className="border border-blue-200 rounded-lg p-3 text-sm bg-blue-50 space-y-2">
+        <select value={form.type} onChange={(e) => setForm(f => ({ ...f, type: e.target.value }))} className={inp}>
+          {['電話', 'メール', '面談', 'その他'].map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input value={form.result} onChange={(e) => setForm(f => ({ ...f, result: e.target.value }))}
+          placeholder="対応結果" className={inp} />
+        <textarea value={form.content} onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))}
+          rows={3} className={inp + ' resize-none'} />
+        <input value={form.nextContent} onChange={(e) => setForm(f => ({ ...f, nextContent: e.target.value }))}
+          placeholder="次回予定" className={inp} />
+        <input type="date" value={form.nextDeadline} onChange={(e) => setForm(f => ({ ...f, nextDeadline: e.target.value }))} className={inp} />
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setEditing(false)} className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">
+            <X size={12} />キャンセル
+          </button>
+          <button onClick={handleSave} disabled={loading}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#0070D2] text-white rounded-lg disabled:opacity-50">
+            <Check size={12} />{loading ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex gap-3 group">
+      <div className="text-xl shrink-0 mt-0.5">{historyIcon(h.type)}</div>
+      <div className="flex-1 border border-gray-100 rounded-lg p-3 text-sm">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <span className="font-medium text-gray-800">{h.type}</span>
+          {h.result && <span className="text-gray-500 text-xs">— {h.result}</span>}
+          <span className="text-xs text-gray-400 ml-auto">{fmt(h.date)} / {h.ca}</span>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => setEditing(true)} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-500">
+              <Pencil size={12} />
+            </button>
+            <button onClick={handleDelete} className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-red-500">
+              <Trash2 size={12} />
+            </button>
+          </div>
+        </div>
+        {h.content && <p className="text-gray-700 leading-relaxed">{h.content}</p>}
+        {h.nextContent && (
+          <p className="text-xs text-blue-600 mt-1.5">
+            次回: {h.nextContent}{h.nextDeadline && ` (${fmt(h.nextDeadline)})`}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ========== Main Component ==========
 export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [history, setHistory] = useState<History[]>([])
-  const [tab, setTab] = useState<'history' | 'tasks' | 'meetings'>('history')
+  const [tab, setTab] = useState<'all' | 'history' | 'tasks' | 'meetings'>('all')
   const [loading, setLoading] = useState(true)
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [showYomiModal, setShowYomiModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -296,20 +424,14 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       if (cRes.ok) setCustomer(await cRes.json())
       if (tRes.ok) setTasks(await tRes.json())
       if (mRes.ok) setMeetings(await mRes.json())
-      if (hRes.ok) setHistory((await hRes.json() as History[]).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
-    } finally {
-      setLoading(false)
-    }
+      if (hRes.ok) {
+        const h = await hRes.json() as History[]
+        setHistory(h.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
+      }
+    } finally { setLoading(false) }
   }, [customerId])
 
   useEffect(() => { fetchAll() }, [fetchAll])
-
-  async function handleDelete() {
-    if (!customer) return
-    if (!confirm(`「${customer.name}」を削除しますか？この操作は取り消せません。`)) return
-    await fetch(`/api/customers/${customer.id}`, { method: 'DELETE' })
-    window.location.href = '/customers'
-  }
 
   async function toggleTaskStatus(task: Task) {
     const newStatus = task.status === '完了' ? '未完了' : '完了'
@@ -319,6 +441,13 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       body: JSON.stringify({ status: newStatus }),
     })
     setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: newStatus } : t))
+  }
+
+  async function handleDelete() {
+    if (!customer) return
+    if (!confirm(`「${customer.name}」を削除しますか？この操作は取り消せません。`)) return
+    await fetch(`/api/customers/${customer.id}`, { method: 'DELETE' })
+    window.location.href = '/customers'
   }
 
   if (loading) {
@@ -337,21 +466,37 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
     return (
       <div className="max-w-screen-xl mx-auto px-4 py-6 text-center text-gray-500">
         <p>顧客が見つかりません</p>
-        <Link href="/customers" className="text-blue-500 hover:underline mt-2 inline-block">
-          顧客一覧に戻る
-        </Link>
+        <Link href="/customers" className="text-blue-500 hover:underline mt-2 inline-block">顧客一覧に戻る</Link>
       </div>
     )
   }
 
   const stageIndex = getStageIndex(customer.status)
 
+  // すべてタブ: 履歴+タスク+面談を日付順でマージ
+  type AllItem =
+    | { kind: 'history'; data: History }
+    | { kind: 'task'; data: Task }
+    | { kind: 'meeting'; data: Meeting }
+
+  const allItems: AllItem[] = [
+    ...history.map(d => ({ kind: 'history' as const, data: d })),
+    ...tasks.map(d => ({ kind: 'task' as const, data: d })),
+    ...meetings.map(d => ({ kind: 'meeting' as const, data: d })),
+  ].sort((a, b) => {
+    const dateA = a.kind === 'history' ? new Date(a.data.date).getTime()
+      : a.kind === 'task' ? new Date(a.data.deadline ?? 0).getTime()
+      : new Date((a.data as Meeting).date ?? 0).getTime()
+    const dateB = b.kind === 'history' ? new Date(b.data.date).getTime()
+      : b.kind === 'task' ? new Date(b.data.deadline ?? 0).getTime()
+      : new Date((b.data as Meeting).date ?? 0).getTime()
+    return dateB - dateA
+  })
+
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6 space-y-4">
-      {/* Back nav */}
       <Link href="/customers" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 w-fit">
-        <ChevronLeft size={16} />
-        顧客一覧に戻る
+        <ChevronLeft size={16} />顧客一覧に戻る
       </Link>
 
       {/* Top card */}
@@ -367,57 +512,37 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => setShowStatusModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-[#0070D2] text-white rounded-lg text-sm hover:bg-[#005fb2] transition-colors"
-            >
-              <Edit size={14} />
-              ステータス変更
+            <button onClick={() => setShowStatusModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-[#0070D2] text-white rounded-lg text-sm hover:bg-[#005fb2] transition-colors">
+              <Edit size={14} />ステータス変更
             </button>
-            <button
-              onClick={() => setShowYomiModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-            >
-              <Star size={14} />
-              ヨミ更新
+            <button onClick={() => setShowYomiModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+              <Star size={14} />ヨミ更新
             </button>
-            <button
-              onClick={() => setShowHistoryModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-            >
-              <Clock size={14} />
-              対応記録を追加
+            <button onClick={() => setShowHistoryModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+              <Clock size={14} />対応記録を追加
             </button>
-            <button
-              onClick={handleDelete}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50 transition-colors"
-            >
-              <Trash2 size={14} />
-              削除
+            <button onClick={handleDelete}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50 transition-colors">
+              <Trash2 size={14} />削除
             </button>
           </div>
         </div>
 
-        {/* Pipeline progress */}
         {stageIndex >= 0 && (
           <div className="mt-5 overflow-x-auto">
             <div className="flex items-center gap-0 min-w-[600px]">
               {PIPELINE_STAGES.map((stage, i) => (
                 <div key={stage} className="flex items-center flex-1">
                   <div className="flex flex-col items-center flex-1">
-                    <div
-                      className={cn(
-                        'w-3 h-3 rounded-full border-2 transition-all',
-                        i < stageIndex
-                          ? 'bg-[#0070D2] border-[#0070D2]'
-                          : i === stageIndex
-                          ? 'bg-[#0070D2] border-[#0070D2] ring-2 ring-blue-200 scale-125'
-                          : 'bg-white border-gray-300'
-                      )}
-                    />
-                    <span className={cn('text-[9px] mt-1 text-center leading-tight', i === stageIndex ? 'text-blue-600 font-bold' : 'text-gray-400')}>
-                      {stage}
-                    </span>
+                    <div className={cn('w-3 h-3 rounded-full border-2 transition-all',
+                      i < stageIndex ? 'bg-[#0070D2] border-[#0070D2]'
+                      : i === stageIndex ? 'bg-[#0070D2] border-[#0070D2] ring-2 ring-blue-200 scale-125'
+                      : 'bg-white border-gray-300')} />
+                    <span className={cn('text-[9px] mt-1 text-center leading-tight',
+                      i === stageIndex ? 'text-blue-600 font-bold' : 'text-gray-400')}>{stage}</span>
                   </div>
                   {i < PIPELINE_STAGES.length - 1 && (
                     <div className={cn('h-0.5 flex-1 -mt-3', i < stageIndex ? 'bg-[#0070D2]' : 'bg-gray-200')} />
@@ -433,7 +558,13 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left: Info card */}
         <div className="bg-white rounded-xl shadow-sm p-5 space-y-3 text-sm">
-          <h2 className="font-bold text-gray-700 border-b pb-2">基本情報</h2>
+          <div className="flex items-center justify-between border-b pb-2">
+            <h2 className="font-bold text-gray-700">基本情報</h2>
+            <button onClick={() => setShowEditModal(true)}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-500 transition-colors">
+              <Pencil size={12} />編集
+            </button>
+          </div>
           <InfoRow icon={<Phone size={14} />} label="電話" value={customer.phone} />
           <InfoRow icon={<Mail size={14} />} label="メール" value={customer.email} />
           <InfoRow icon={<Users size={14} />} label="年齢・性別" value={[customer.age && `${customer.age}歳`, customer.gender].filter(Boolean).join(' / ')} />
@@ -453,6 +584,12 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
           <InfoRow icon={<Calendar size={14} />} label="登録日" value={fmt(customer.registeredAt)} />
           <InfoRow icon={<Calendar size={14} />} label="最終更新日" value={fmt(customer.updatedAt)} />
           <InfoRow icon={<Calendar size={14} />} label="最終対応日" value={fmt(customer.lastContact)} />
+          {customer.nextAction && (
+            <div className="pt-1 bg-blue-50 rounded-lg p-2">
+              <p className="text-xs text-blue-700 font-medium">次回: {customer.nextAction}</p>
+              {customer.nextDeadline && <p className="text-xs text-blue-500">{fmt(customer.nextDeadline)}</p>}
+            </div>
+          )}
           {customer.note && (
             <div className="pt-2">
               <p className="text-xs text-gray-500 font-medium mb-1">備考</p>
@@ -463,162 +600,136 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
 
         {/* Right: Tabs */}
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm overflow-hidden">
-          {/* Tab headers */}
           <div className="flex border-b border-gray-200">
             {([
+              { key: 'all', label: 'すべて', count: allItems.length },
               { key: 'history', label: '活動履歴', count: history.length },
               { key: 'tasks', label: 'タスク', count: tasks.length },
               { key: 'meetings', label: '面談', count: meetings.length },
             ] as const).map(({ key, label, count }) => (
-              <button
-                key={key}
-                onClick={() => setTab(key)}
-                className={cn(
-                  'px-5 py-3 text-sm font-medium border-b-2 transition-colors',
-                  tab === key
-                    ? 'border-[#0070D2] text-[#0070D2]'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                )}
-              >
+              <button key={key} onClick={() => setTab(key)}
+                className={cn('px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+                  tab === key ? 'border-[#0070D2] text-[#0070D2]' : 'border-transparent text-gray-500 hover:text-gray-700')}>
                 {label}
-                {count > 0 && (
-                  <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
-                    {count}
-                  </span>
-                )}
+                {count > 0 && <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">{count}</span>}
               </button>
             ))}
           </div>
 
           <div className="p-4 overflow-y-auto max-h-[600px]">
-            {/* Activity History Tab */}
-            {tab === 'history' && (
-              <div>
-                {history.length === 0 ? (
-                  <EmptyState message="活動履歴がありません" />
-                ) : (
-                  <div className="space-y-3">
-                    {history.map((h) => (
-                      <div key={h.id} className="flex gap-3">
-                        <div className="text-xl shrink-0 mt-0.5">{historyIcon(h.type)}</div>
-                        <div className="flex-1 border border-gray-100 rounded-lg p-3 text-sm">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="font-medium text-gray-800">{h.type}</span>
-                            {h.result && <span className="text-gray-500 text-xs">— {h.result}</span>}
-                            <span className="text-xs text-gray-400 ml-auto">{fmt(h.date)} / {h.ca}</span>
-                          </div>
-                          {h.content && <p className="text-gray-700 leading-relaxed">{h.content}</p>}
-                          {h.nextContent && (
-                            <p className="text-xs text-blue-600 mt-1.5">
-                              次回: {h.nextContent}
-                              {h.nextDeadline && ` (${fmt(h.nextDeadline)})`}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Tasks Tab */}
-            {tab === 'tasks' && (
-              <div>
-                {tasks.length === 0 ? (
-                  <EmptyState message="タスクがありません" />
-                ) : (
-                  <div className="space-y-2">
-                    {tasks.map((t) => (
-                      <div key={t.id} className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm">
-                        <button onClick={() => toggleTaskStatus(t)} className="mt-0.5 shrink-0">
-                          <CheckSquare
-                            size={18}
-                            className={t.status === '完了' ? 'text-green-500' : 'text-gray-300'}
-                          />
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className={cn('font-medium', t.status === '完了' && 'line-through text-gray-400')}>
-                            {t.content}
-                          </p>
-                          <div className="flex gap-3 mt-1 text-xs text-gray-400 flex-wrap">
-                            <span>期限: {fmt(t.deadline)}</span>
-                            <span>優先度: {t.priority}</span>
-                            <span>{t.ca}</span>
+            {/* すべてタブ */}
+            {tab === 'all' && (
+              allItems.length === 0 ? <EmptyState message="記録がありません" /> : (
+                <div className="space-y-3">
+                  {allItems.map((item) => {
+                    if (item.kind === 'history') {
+                      return <HistoryItem key={`h-${item.data.id}`} h={item.data} onUpdate={fetchAll} />
+                    }
+                    if (item.kind === 'task') {
+                      const t = item.data
+                      return (
+                        <div key={`t-${t.id}`} className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm bg-yellow-50/40">
+                          <span className="text-lg shrink-0">✅</span>
+                          <div className="flex-1 min-w-0">
+                            <p className={cn('font-medium', t.status === '完了' && 'line-through text-gray-400')}>{t.content}</p>
+                            <div className="flex gap-3 mt-1 text-xs text-gray-400">
+                              <span>期限: {fmt(t.deadline)}</span>
+                              <span className={cn('font-medium', t.status === '完了' ? 'text-green-600' : 'text-yellow-600')}>{t.status}</span>
+                            </div>
                           </div>
                         </div>
-                        <span className={cn(
-                          'shrink-0 text-xs px-2 py-0.5 rounded-full',
-                          t.status === '完了' ? 'bg-green-100 text-green-700' : 'bg-yellow-50 text-yellow-700'
-                        )}>
-                          {t.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Meetings Tab */}
-            {tab === 'meetings' && (
-              <div>
-                {meetings.length === 0 ? (
-                  <EmptyState message="面談記録がありません" />
-                ) : (
-                  <div className="space-y-3">
-                    {meetings.map((m) => (
-                      <div key={m.id} className="border border-gray-100 rounded-lg p-4 text-sm">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="font-medium text-gray-900">
-                            {fmt(m.date)} {m.startTime && `${m.startTime}〜${m.endTime}`}
-                          </div>
-                          <span className={cn(
-                            'text-xs px-2 py-0.5 rounded-full',
+                      )
+                    }
+                    const m = item.data as Meeting
+                    return (
+                      <div key={`m-${m.id}`} className="border border-gray-100 rounded-lg p-3 text-sm bg-blue-50/30">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-lg">🤝</span>
+                          <span className="font-medium text-gray-800">面談</span>
+                          <span className="text-xs text-gray-500">{fmt(m.date)} {m.startTime && `${m.startTime}〜${m.endTime}`}</span>
+                          <span className={cn('ml-auto text-xs px-2 py-0.5 rounded-full',
                             m.status === '完了' ? 'bg-green-100 text-green-700'
                             : m.status === 'キャンセル' ? 'bg-red-100 text-red-700'
-                            : 'bg-blue-100 text-blue-700'
-                          )}>
-                            {m.status}
-                          </span>
+                            : 'bg-blue-100 text-blue-700')}>{m.status}</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                          <div>方法: {m.method}</div>
-                          <div>温度感: {m.temp}</div>
-                          {m.result && <div className="col-span-2">結果: {m.result}</div>}
-                          {m.nextAction && <div className="col-span-2 text-blue-600">次回: {m.nextAction} ({fmt(m.nextDeadline)})</div>}
+                        {m.result && <p className="text-xs text-gray-600 ml-8">結果: {m.result}</p>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            )}
+
+            {/* 活動履歴タブ */}
+            {tab === 'history' && (
+              history.length === 0 ? <EmptyState message="活動履歴がありません" /> : (
+                <div className="space-y-3">
+                  {history.map((h) => <HistoryItem key={h.id} h={h} onUpdate={fetchAll} />)}
+                </div>
+              )
+            )}
+
+            {/* タスクタブ */}
+            {tab === 'tasks' && (
+              tasks.length === 0 ? <EmptyState message="タスクがありません" /> : (
+                <div className="space-y-2">
+                  {tasks.map((t) => (
+                    <div key={t.id} className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm">
+                      <button onClick={() => toggleTaskStatus(t)} className="mt-0.5 shrink-0">
+                        <CheckSquare size={18} className={t.status === '完了' ? 'text-green-500' : 'text-gray-300'} />
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className={cn('font-medium', t.status === '完了' && 'line-through text-gray-400')}>{t.content}</p>
+                        <div className="flex gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                          <span>期限: {fmt(t.deadline)}</span>
+                          <span>優先度: {t.priority}</span>
+                          <span>{t.ca}</span>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      <span className={cn('shrink-0 text-xs px-2 py-0.5 rounded-full',
+                        t.status === '完了' ? 'bg-green-100 text-green-700' : 'bg-yellow-50 text-yellow-700')}>
+                        {t.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* 面談タブ */}
+            {tab === 'meetings' && (
+              meetings.length === 0 ? <EmptyState message="面談記録がありません" /> : (
+                <div className="space-y-3">
+                  {meetings.map((m) => (
+                    <div key={m.id} className="border border-gray-100 rounded-lg p-4 text-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="font-medium text-gray-900">
+                          {fmt(m.date)} {m.startTime && `${m.startTime}〜${m.endTime}`}
+                        </div>
+                        <span className={cn('text-xs px-2 py-0.5 rounded-full',
+                          m.status === '完了' ? 'bg-green-100 text-green-700'
+                          : m.status === 'キャンセル' ? 'bg-red-100 text-red-700'
+                          : 'bg-blue-100 text-blue-700')}>{m.status}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                        <div>方法: {m.method}</div>
+                        <div>温度感: {m.temp}</div>
+                        {m.result && <div className="col-span-2">結果: {m.result}</div>}
+                        {m.nextAction && <div className="col-span-2 text-blue-600">次回: {m.nextAction} ({fmt(m.nextDeadline)})</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
             )}
           </div>
         </div>
       </div>
 
-      {showStatusModal && customer && (
-        <StatusChangeModal
-          customer={customer}
-          onClose={() => setShowStatusModal(false)}
-          onUpdate={fetchAll}
-        />
-      )}
-      {showYomiModal && customer && (
-        <YomiModal
-          customer={customer}
-          onClose={() => setShowYomiModal(false)}
-          onUpdate={fetchAll}
-        />
-      )}
-      {showHistoryModal && customer && (
-        <AddHistoryModal
-          customer={customer}
-          onClose={() => setShowHistoryModal(false)}
-          onUpdate={fetchAll}
-        />
-      )}
+      {showStatusModal && <StatusChangeModal customer={customer} onClose={() => setShowStatusModal(false)} onUpdate={fetchAll} />}
+      {showYomiModal && <YomiModal customer={customer} onClose={() => setShowYomiModal(false)} onUpdate={fetchAll} />}
+      {showHistoryModal && <AddHistoryModal customer={customer} onClose={() => setShowHistoryModal(false)} onUpdate={fetchAll} />}
+      {showEditModal && <EditInfoModal customer={customer} onClose={() => setShowEditModal(false)} onUpdate={fetchAll} />}
     </div>
   )
 }
@@ -635,7 +746,5 @@ function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string;
 }
 
 function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="py-12 text-center text-gray-400 text-sm">{message}</div>
-  )
+  return <div className="py-12 text-center text-gray-400 text-sm">{message}</div>
 }
