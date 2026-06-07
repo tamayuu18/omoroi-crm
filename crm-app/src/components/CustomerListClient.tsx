@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { format, isAfter, parseISO } from 'date-fns'
-import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react'
+import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, INFLOW_OPTIONS, PREF_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS } from '@/lib/constants'
@@ -27,6 +27,123 @@ const INITIAL_FORM = {
   hopeSalary: '', timing: '', expectedCloseMonth: '', note: ''
 }
 
+const PREVIEW_LABELS: Record<string, string> = {
+  name: '氏名', kana: 'フリガナ', phone: '電話番号', email: 'メール',
+  age: '年齢', gender: '性別', area: '居住地', company: '現職企業',
+  job: '現職職種', salary: '現在年収', hopeJob: '希望職種', hopeArea: '希望勤務地',
+  hopeSalary: '希望年収', timing: '転職時期', ca: '担当CA', inflow: '流入元',
+  status: 'ステータス', yomiRank: 'ヨミ', expectedCloseMonth: '受注予定月', note: '備考',
+}
+
+// ========== CSV Preview Modal ==========
+function CsvPreviewModal({
+  rows, total, onConfirm, onClose, importing
+}: {
+  rows: Record<string, string>[]
+  total: number
+  onConfirm: () => void
+  onClose: () => void
+  importing: boolean
+}) {
+  const cols = ['name', 'kana', 'phone', 'email', 'ca', 'inflow', 'status', 'area', 'company', 'job']
+  const presentCols = cols.filter(c => rows.some(r => r[c]))
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+        <div className="p-5 border-b flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="text-lg font-bold">CSVインポート確認</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {total}件を読み込みました。内容を確認してから登録してください。
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+
+        {/* Preview table */}
+        <div className="overflow-auto flex-1 p-4">
+          {rows.length === 0 ? (
+            <div className="py-12 text-center text-red-500">
+              <p className="font-medium">氏名が取得できる行がありませんでした。</p>
+              <p className="text-sm mt-1 text-gray-500">CSVのヘッダー行に「氏名」列が必要です。</p>
+            </div>
+          ) : (
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left text-gray-600">#</th>
+                  {presentCols.map(c => (
+                    <th key={c} className="border border-gray-200 px-2 py-1.5 text-left text-gray-600">
+                      {PREVIEW_LABELS[c] ?? c}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={i} className={cn('hover:bg-blue-50', !row.name && 'bg-red-50')}>
+                    <td className="border border-gray-200 px-2 py-1.5 text-gray-400">{i + 1}</td>
+                    {presentCols.map(c => (
+                      <td key={c} className={cn(
+                        'border border-gray-200 px-2 py-1.5 max-w-[180px] truncate',
+                        c === 'name' && !row[c] && 'bg-red-100 text-red-600',
+                        c === 'name' && row[c] && 'font-medium text-gray-800'
+                      )}>
+                        {row[c] || <span className="text-gray-300">—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {total > rows.length && (
+            <p className="mt-2 text-xs text-gray-400 text-center">表示は最初の{rows.length}件。合計{total}件が登録されます。</p>
+          )}
+        </div>
+
+        {rows.length > 0 && (
+          <div className="p-4 border-t bg-gray-50 flex gap-3 justify-end shrink-0">
+            <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100">
+              キャンセル
+            </button>
+            <button onClick={onConfirm} disabled={importing}
+              className="px-6 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50 font-medium">
+              {importing ? '登録中...' : `${total}件を登録する`}
+            </button>
+          </div>
+        )}
+        {rows.length === 0 && (
+          <div className="p-4 border-t bg-gray-50 flex justify-end shrink-0">
+            <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100">閉じる</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ========== Bulk Status Modal ==========
+function BulkStatusModal({ count, onApply, onClose }: { count: number; onApply: (s: string) => void; onClose: () => void }) {
+  const [status, setStatus] = useState(ALL_STATUSES[0])
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-bold mb-4">一括ステータス変更（{count}件）</h2>
+        <select value={status} onChange={e => setStatus(e.target.value as CustomerStatus)} className={inp + ' mb-4'}>
+          {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">キャンセル</button>
+          <button onClick={() => onApply(status)} className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2]">変更する</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ========== Main ==========
 export function CustomerListClient() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -37,11 +154,23 @@ export function CustomerListClient() {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('updatedAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  // New customer modal
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(INITIAL_FORM)
   const [saving, setSaving] = useState(false)
-  const [importing, setImporting] = useState(false)
+
+  // CSV
   const fileRef = useRef<HTMLInputElement>(null)
+  const [csvRows, setCsvRows] = useState<Record<string, string>[] | null>(null)
+  const [csvTotal, setCsvTotal] = useState(0)
+  const [csvRawText, setCsvRawText] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  // Bulk selection
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [showBulkStatus, setShowBulkStatus] = useState(false)
+  const [bulkLoading, setBulkLoading] = useState(false)
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
@@ -57,6 +186,7 @@ export function CustomerListClient() {
       const res = await fetch(`/api/customers?${params}`)
       if (!res.ok) throw new Error('Failed')
       setCustomers(await res.json() as Customer[])
+      setSelected(new Set())
     } catch {
       setError('顧客データの取得に失敗しました')
     } finally {
@@ -96,27 +226,93 @@ export function CustomerListClient() {
     }
   }
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // CSV: ファイル選択 → プレビュー取得
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    setImporting(true)
+    const text = await file.text()
+    setCsvRawText(text)
+    if (fileRef.current) fileRef.current.value = ''
+    // プレビューAPIを呼ぶ
     try {
-      const text = await file.text()
-      const res = await fetch('/api/import', {
+      const res = await fetch('/api/import?preview=1', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: text,
       })
       const data = await res.json()
+      if (!res.ok) { alert(`CSVの読み込みに失敗しました: ${data.error}`); return }
+      setCsvRows(data.rows)
+      setCsvTotal(data.total)
+    } catch (err) {
+      alert(`エラー: ${err}`)
+    }
+  }
+
+  // CSV: 確認後に本登録
+  const handleImportConfirm = async () => {
+    setImporting(true)
+    try {
+      const res = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: csvRawText,
+      })
+      const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      setCsvRows(null)
       alert(`✅ インポート完了\n追加: ${data.added}件\nスキップ(重複): ${data.skipped}件`)
       await fetchCustomers()
     } catch (err) {
       alert(`❌ エラー: ${err}`)
     } finally {
       setImporting(false)
-      if (fileRef.current) fileRef.current.value = ''
     }
+  }
+
+  // 一括削除
+  const handleBulkDelete = async () => {
+    if (!confirm(`選択した${selected.size}件を削除しますか？この操作は取り消せません。`)) return
+    setBulkLoading(true)
+    try {
+      await fetch('/api/customers/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...selected], action: 'delete' }),
+      })
+      await fetchCustomers()
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
+  // 一括ステータス変更
+  const handleBulkStatus = async (status: string) => {
+    setBulkLoading(true)
+    try {
+      await fetch('/api/customers/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...selected], action: 'updateStatus', status }),
+      })
+      setShowBulkStatus(false)
+      await fetchCustomers()
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    if (selected.size === customers.length) setSelected(new Set())
+    else setSelected(new Set(customers.map(c => c.id)))
   }
 
   function f(key: keyof typeof form) {
@@ -130,19 +326,13 @@ export function CustomerListClient() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-900">顧客一覧</h1>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv" onChange={handleImport} className="hidden" />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={importing}
-            className="flex items-center gap-1.5 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            <Upload size={15} />
-            {importing ? 'インポート中...' : 'CSVインポート'}
+          <input ref={fileRef} type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
+          <button onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-1.5 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+            <Upload size={15} />CSVインポート
           </button>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-1.5 bg-[#0070D2] hover:bg-[#005fb2] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
+          <button onClick={() => setShowModal(true)}
+            className="flex items-center gap-1.5 bg-[#0070D2] hover:bg-[#005fb2] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
             <Plus size={16} />新規登録
           </button>
         </div>
@@ -152,34 +342,48 @@ export function CustomerListClient() {
       <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="氏名・メール・電話で検索"
-            value={search}
+          <input type="text" placeholder="氏名・メール・電話で検索" value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+            className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">すべてのステータス</option>
-          {ALL_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <select value={caFilter} onChange={(e) => setCaFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">すべての担当CA</option>
-          {CA_OPTIONS.map((ca) => <option key={ca} value={ca}>{ca}</option>)}
+          {CA_OPTIONS.map(ca => <option key={ca} value={ca}>{ca}</option>)}
         </select>
         <select value={yomiFilter} onChange={(e) => setYomiFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">ヨミランク</option>
-          {['S', 'A', 'B', 'C', 'D'].map((r) => <option key={r} value={r}>{r}</option>)}
+          {['S', 'A', 'B', 'C', 'D'].map(r => <option key={r} value={r}>{r}</option>)}
         </select>
         <button onClick={fetchCustomers}
           className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition-colors">
           検索
         </button>
       </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="bg-blue-700 text-white rounded-lg px-4 py-2.5 mb-3 flex items-center gap-4">
+          <span className="text-sm font-medium">{selected.size}件選択中</span>
+          <button onClick={() => setShowBulkStatus(true)} disabled={bulkLoading}
+            className="flex items-center gap-1.5 text-sm bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors">
+            <Edit size={13} />ステータス一括変更
+          </button>
+          <button onClick={handleBulkDelete} disabled={bulkLoading}
+            className="flex items-center gap-1.5 text-sm bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition-colors ml-auto">
+            <Trash2 size={13} />一括削除
+          </button>
+          <button onClick={() => setSelected(new Set())} className="text-white/70 hover:text-white">
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
@@ -197,6 +401,11 @@ export function CustomerListClient() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="px-3 py-3 w-8">
+                  <input type="checkbox" checked={selected.size === customers.length && customers.length > 0}
+                    onChange={toggleAll}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                </th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('name')}>氏名<SortIcon col="name" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('status')}>ステータス<SortIcon col="status" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">担当CA</th>
@@ -209,24 +418,28 @@ export function CustomerListClient() {
             <tbody className="divide-y divide-gray-100">
               {customers.map((c) => {
                 const overdue = isOverdue(c.nextDeadline)
+                const isSelected = selected.has(c.id)
                 return (
-                  <tr key={c.id} className="hover:bg-blue-50 cursor-pointer transition-colors"
-                    onClick={() => { window.location.href = `/customers/${c.id}` }}>
-                    <td className="px-4 py-3 font-medium text-gray-900">
+                  <tr key={c.id} className={cn('hover:bg-blue-50 cursor-pointer transition-colors', isSelected && 'bg-blue-50')}>
+                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(c.id)}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900" onClick={() => { window.location.href = `/customers/${c.id}` }}>
                       <Link href={`/customers/${c.id}`} className="hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
                         {c.name}
                       </Link>
                       {c.kana && <div className="text-xs text-gray-400">{c.kana}</div>}
                     </td>
-                    <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
-                    <td className="px-4 py-3 text-gray-700">{c.ca}</td>
-                    <td className="px-4 py-3 text-gray-500">{formatDate(c.registeredAt)}</td>
-                    <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate">{c.nextAction}</td>
-                    <td className={cn('px-4 py-3 font-medium', overdue ? 'text-red-600' : 'text-gray-700')}>
+                    <td className="px-4 py-3" onClick={() => { window.location.href = `/customers/${c.id}` }}><StatusBadge status={c.status} /></td>
+                    <td className="px-4 py-3 text-gray-700" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.ca}</td>
+                    <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{formatDate(c.registeredAt)}</td>
+                    <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.nextAction}</td>
+                    <td className={cn('px-4 py-3 font-medium', overdue ? 'text-red-600' : 'text-gray-700')} onClick={() => { window.location.href = `/customers/${c.id}` }}>
                       {formatDate(c.nextDeadline)}
                       {overdue && <span className="ml-1 text-xs">(!)</span>}
                     </td>
-                    <td className="px-4 py-3"><YomiRankBadge rank={c.yomiRank} /></td>
+                    <td className="px-4 py-3" onClick={() => { window.location.href = `/customers/${c.id}` }}><YomiRankBadge rank={c.yomiRank} /></td>
                   </tr>
                 )
               })}
@@ -237,6 +450,26 @@ export function CustomerListClient() {
           <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{customers.length}件</div>
         )}
       </div>
+
+      {/* CSV Preview Modal */}
+      {csvRows !== null && (
+        <CsvPreviewModal
+          rows={csvRows}
+          total={csvTotal}
+          onConfirm={handleImportConfirm}
+          onClose={() => setCsvRows(null)}
+          importing={importing}
+        />
+      )}
+
+      {/* Bulk Status Modal */}
+      {showBulkStatus && (
+        <BulkStatusModal
+          count={selected.size}
+          onApply={handleBulkStatus}
+          onClose={() => setShowBulkStatus(false)}
+        />
+      )}
 
       {/* New Customer Modal */}
       {showModal && (
@@ -308,12 +541,6 @@ export function CustomerListClient() {
           </div>
         </div>
       )}
-
-      {/* CSV format hint */}
-      <p className="mt-2 text-xs text-gray-400">
-        CSVインポート: スプレッドシートを「ファイル→ダウンロード→CSV」で書き出してアップロード。
-        ヘッダー行に「氏名」「電話番号」「担当CA」「流入元」「受注予定月」などを含めてください。
-      </p>
     </div>
   )
 }

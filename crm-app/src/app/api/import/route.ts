@@ -68,10 +68,17 @@ export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const preview = request.nextUrl.searchParams.get('preview') === '1'
+
   try {
     const text = await request.text()
     const rows = parseCSV(text)
     if (!rows.length) return Response.json({ error: 'no valid rows' }, { status: 400 })
+
+    // プレビューモード: 保存せず解析結果を返す
+    if (preview) {
+      return Response.json({ ok: true, preview: true, rows: rows.slice(0, 50), total: rows.length })
+    }
 
     let added = 0, skipped = 0
     for (const row of rows) {

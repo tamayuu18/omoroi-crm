@@ -260,6 +260,67 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
+// ========== Add Task Modal ==========
+function AddTaskModal({ customer, onClose, onUpdate }: ModalProps) {
+  const [content, setContent] = useState('')
+  const [deadline, setDeadline] = useState('')
+  const [priority, setPriority] = useState('中')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    if (!content.trim()) return
+    setLoading(true)
+    try {
+      await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: customer.id,
+          name: customer.name,
+          ca: customer.ca,
+          content,
+          deadline,
+          priority,
+        }),
+      })
+      onUpdate()
+      onClose()
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h2 className="text-lg font-bold text-gray-900 mb-4">タスクを追加</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">タスク内容 *</label>
+            <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={3}
+              placeholder="例: 求人票3件送付する" className={inp + ' resize-none'} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">期限</label>
+            <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} className={inp} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">優先度</label>
+            <select value={priority} onChange={(e) => setPriority(e.target.value)} className={inp}>
+              {['高', '中', '低'].map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end mt-4">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
+          <button onClick={handleSubmit} disabled={loading || !content.trim()}
+            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50">
+            {loading ? '追加中...' : '追加する'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ========== Add History Modal ==========
 function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
   const [type, setType] = useState('電話')
@@ -421,6 +482,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [showYomiModal, setShowYomiModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [showTaskModal, setShowTaskModal] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -681,7 +743,14 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
 
             {/* タスクタブ */}
             {tab === 'tasks' && (
-              tasks.length === 0 ? <EmptyState message="タスクがありません" /> : (
+              <div>
+                <div className="flex justify-end mb-3">
+                  <button onClick={() => setShowTaskModal(true)}
+                    className="flex items-center gap-1.5 text-sm bg-[#0070D2] text-white px-3 py-1.5 rounded-lg hover:bg-[#005fb2] transition-colors">
+                    <span className="text-base leading-none">+</span> タスクを追加
+                  </button>
+                </div>
+              {tasks.length === 0 ? <EmptyState message="タスクがありません" /> : (
                 <div className="space-y-2">
                   {tasks.map((t) => (
                     <div key={t.id} className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm">
@@ -703,7 +772,8 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
                     </div>
                   ))}
                 </div>
-              )
+              )}
+              </div>
             )}
 
             {/* 面談タブ */}
@@ -740,6 +810,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       {showYomiModal && <YomiModal customer={customer} onClose={() => setShowYomiModal(false)} onUpdate={fetchAll} />}
       {showHistoryModal && <AddHistoryModal customer={customer} onClose={() => setShowHistoryModal(false)} onUpdate={fetchAll} />}
       {showEditModal && <EditInfoModal customer={customer} onClose={() => setShowEditModal(false)} onUpdate={fetchAll} />}
+      {showTaskModal && <AddTaskModal customer={customer} onClose={() => setShowTaskModal(false)} onUpdate={fetchAll} />}
     </div>
   )
 }
