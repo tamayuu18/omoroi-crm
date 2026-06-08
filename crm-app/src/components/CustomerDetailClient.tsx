@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
-  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check
+  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check, Download
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History } from '@/types'
 import { ALL_STATUSES } from '@/types'
@@ -264,6 +264,128 @@ function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+// Lreachヒアリングメモのパーサー
+function parseLreachText(text: string): Record<string, string> {
+  const fieldMap: [RegExp, string][] = [
+    [/^(名前|氏名)\s*[：:]\s*(.+)/, 'name'],
+    [/^(ふりがな|フリガナ)\s*[：:]\s*(.+)/, 'kana'],
+    [/^性別\s*[：:]\s*(.+)/, 'gender'],
+    [/^(電話番号|TEL|Tel)\s*[：:]\s*(.+)/, 'phone'],
+    [/^(アドレス|メール|メールアドレス|email)\s*[：:]\s*(.+)/i, 'email'],
+    [/^(所在地|住所|居住地)\s*[：:]\s*(.+)/, 'area'],
+    [/^希望勤務地\s*[：:]\s*(.+)/, 'hopeArea'],
+    [/^(現在の職種|現職種|現職職種|職種)\s*[：:]\s*(.+)/, 'job'],
+    [/^(現職企業|会社名|企業名|現勤務先)\s*[：:]\s*(.+)/, 'company'],
+    [/^(現在年収|現在の年収|年収)\s*[：:]\s*(.+)/, 'salary'],
+    [/^希望年収\s*[：:]\s*(.+)/, 'hopeSalary'],
+    [/^希望職種\s*[：:]\s*(.+)/, 'hopeJob'],
+    [/^(転職希望時期|転職時期|希望転職時期)\s*[：:]\s*(.+)/, 'timing'],
+  ]
+  const result: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    for (const [pattern, field] of fieldMap) {
+      const m = trimmed.match(pattern)
+      if (m) {
+        result[field] = (m[2] ?? m[1]).trim()
+        break
+      }
+    }
+  }
+  // 年収の「万円」「万」を除去して数値のみに
+  if (result.salary) result.salary = result.salary.replace(/万円?/, '').trim()
+  if (result.hopeSalary) result.hopeSalary = result.hopeSalary.replace(/万円?/, '').trim()
+  return result
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  name: '氏名', kana: 'フリガナ', gender: '性別', phone: '電話番号', email: 'メール',
+  area: '居住地', hopeArea: '希望勤務地', job: '現職職種', company: '現職企業',
+  salary: '現在年収（万円）', hopeSalary: '希望年収（万円）', hopeJob: '希望職種', timing: '転職希望時期',
+}
+
+// ========== Lreach Import Modal ==========
+function LreachImportModal({ customer, onClose, onUpdate }: ModalProps) {
+  const [text, setText] = useState('')
+  const [parsed, setParsed] = useState<Record<string, string> | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  function handleParse() {
+    const result = parseLreachText(text)
+    if (Object.keys(result).length === 0) {
+      alert('フィールドを読み取れませんでした。Lreachのヒアリングメモをそのまま貼り付けてください。')
+      return
+    }
+    setParsed(result)
+  }
+
+  async function handleSave() {
+    if (!parsed) return
+    setLoading(true)
+    try {
+      await fetch(`/api/customers/${customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      })
+      onUpdate()
+      onClose()
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white">
+          <h2 className="text-lg font-bold">Lreach情報を取込</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+
+        {!parsed ? (
+          <div className="p-5 space-y-3">
+            <p className="text-sm text-gray-500">Lreachのヒアリングメモをそのまま貼り付けてください。</p>
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              rows={14}
+              placeholder={'名前 ： 山田 太郎\nふりがな ： やまだ たろう\n電話番号 ： 09012345678\nアドレス ： example@gmail.com\n...'}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
+              <button onClick={handleParse} disabled={!text.trim()}
+                className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg disabled:opacity-50">
+                内容を確認する
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-5 space-y-3">
+            <p className="text-sm text-gray-600 font-medium">以下の内容で顧客情報を上書きします:</p>
+            <div className="border rounded-lg overflow-hidden text-sm">
+              {Object.entries(parsed).map(([key, val]) => (
+                <div key={key} className="flex border-b last:border-b-0">
+                  <span className="w-36 shrink-0 bg-gray-50 px-3 py-2 text-gray-500 text-xs font-medium border-r">
+                    {FIELD_LABELS[key] ?? key}
+                  </span>
+                  <span className="px-3 py-2 text-gray-800 flex-1">{val}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setParsed(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">戻る</button>
+              <button onClick={handleSave} disabled={loading}
+                className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg disabled:opacity-50">
+                {loading ? '更新中...' : '更新する'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -533,6 +655,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [showYomiModal, setShowYomiModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
+  const [showLreachModal, setShowLreachModal] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -645,6 +768,10 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
             <button onClick={() => setShowHistoryModal(true)}
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors">
               <Clock size={14} />対応記録を追加
+            </button>
+            <button onClick={() => setShowLreachModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-green-300 text-green-700 rounded-lg text-sm hover:bg-green-50 transition-colors">
+              <Download size={14} />Lreach取込
             </button>
             <button onClick={handleDelete}
               className="flex items-center gap-1.5 px-3 py-2 bg-white border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50 transition-colors">
@@ -866,6 +993,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       {showHistoryModal && <AddHistoryModal customer={customer} onClose={() => setShowHistoryModal(false)} onUpdate={fetchAll} />}
       {showEditModal && <EditInfoModal customer={customer} onClose={() => setShowEditModal(false)} onUpdate={fetchAll} />}
       {showTaskModal && <AddTaskModal customer={customer} onClose={() => setShowTaskModal(false)} onUpdate={fetchAll} />}
+      {showLreachModal && <LreachImportModal customer={customer} onClose={() => setShowLreachModal(false)} onUpdate={fetchAll} />}
     </div>
   )
 }
