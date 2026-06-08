@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { format, isAfter, isToday, isThisWeek, parseISO } from 'date-fns'
 import { CheckSquare } from 'lucide-react'
 import type { Task } from '@/types'
+import { CA_OPTIONS } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 function fmt(d: Date | string | null | undefined) {
@@ -36,7 +37,7 @@ const GROUP_LABELS = {
 export function TasksClient() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
-  const [caFilter, setCaFilter] = useState('')
+  const [assigneeFilter, setAssigneeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
   const fetchTasks = useCallback(async () => {
@@ -61,10 +62,8 @@ export function TasksClient() {
     setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: newStatus } : t))
   }
 
-  const caOptions = Array.from(new Set(tasks.map((t) => t.ca).filter((ca): ca is string => !!ca))).sort()
-
   const filtered = tasks.filter((t) => {
-    if (caFilter && t.ca !== caFilter) return false
+    if (assigneeFilter && (t as any).assignee !== assigneeFilter) return false
     if (statusFilter && t.status !== statusFilter) return false
     return true
   })
@@ -85,12 +84,12 @@ export function TasksClient() {
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex gap-3 flex-wrap">
         <select
-          value={caFilter}
-          onChange={(e) => setCaFilter(e.target.value)}
+          value={assigneeFilter}
+          onChange={(e) => setAssigneeFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="">すべての担当CA</option>
-          {caOptions.map((ca) => <option key={ca} value={ca}>{ca}</option>)}
+          <option value="">すべての作業担当者</option>
+          {CA_OPTIONS.map((ca) => <option key={ca} value={ca}>{ca}</option>)}
         </select>
         <select
           value={statusFilter}
@@ -154,7 +153,10 @@ export function TasksClient() {
                         </p>
                         <div className="flex gap-3 mt-1 text-xs text-gray-400 flex-wrap">
                           <span>期限: {fmt(task.deadline)}</span>
-                          <span>担当: {task.ca}</span>
+                          <span>作業担当: {(task as any).assignee || task.ca || '—'}</span>
+                          {(task as any).assignee && task.ca && (task as any).assignee !== task.ca && (
+                            <span>顧客担当CA: {task.ca}</span>
+                          )}
                           {task.relatedStatus && <span>関連: {task.relatedStatus}</span>}
                         </div>
                       </div>

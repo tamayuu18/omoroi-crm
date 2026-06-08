@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
         customerId: body.customerId,
         name: body.name ?? '',
         ca: body.ca ?? '',
+        assignee: body.assignee ?? '',
         content: body.content,
         deadline: body.deadline ? new Date(body.deadline) : null,
         priority: body.priority ?? '中',

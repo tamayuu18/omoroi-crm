@@ -284,6 +284,7 @@ function AddTaskModal({ customer, onClose, onUpdate }: ModalProps) {
   const [content, setContent] = useState('')
   const [deadline, setDeadline] = useState('')
   const [priority, setPriority] = useState('中')
+  const [assignee, setAssignee] = useState(customer.ca ?? '')
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit() {
@@ -297,6 +298,7 @@ function AddTaskModal({ customer, onClose, onUpdate }: ModalProps) {
           customerId: customer.id,
           name: customer.name,
           ca: customer.ca,
+          assignee,
           content,
           deadline,
           priority,
@@ -316,6 +318,13 @@ function AddTaskModal({ customer, onClose, onUpdate }: ModalProps) {
             <label className="block text-sm font-medium text-gray-700 mb-1">タスク内容 *</label>
             <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={3}
               placeholder="例: 求人票3件送付する" className={inp + ' resize-none'} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">作業担当者</label>
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inp}>
+              <option value="">— 選択 —</option>
+              {CA_OPTIONS.map(ca => <option key={ca} value={ca}>{ca}</option>)}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">期限</label>
