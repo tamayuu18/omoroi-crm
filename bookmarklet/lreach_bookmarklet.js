@@ -201,7 +201,7 @@ javascript:(function(){
   var preview = records.slice(0, 5).map(function(r){ return '・' + r.name + (r.phone ? ' (' + r.phone + ')' : ''); }).join('\n');
   if (records.length > 5) preview += '\n  ほか ' + (records.length - 5) + '件';
 
-  if (!confirm('【CRM取込】' + records.length + '件を取り込みます。\n\n' + preview + '\n\nCRMに送信しますか？')) return;
+  if (!confirm('【CRM取込】' + records.length + '件を処理します。\n（新規登録 + 既存顧客の空欄補完）\n\n' + preview + '\n\nCRMに送信しますか？')) return;
 
   // ============================================================
   // about:blank ポップアップ経由でCRM APIに送信
@@ -234,9 +234,9 @@ javascript:(function(){
     'fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-ingest-token":token},body:body})' +
     '.then(function(r){return r.json();})' +
     '.then(function(d){' +
-    '  document.getElementById("s").textContent="✅ 送信完了！ 追加:"+d.added+"件 スキップ:"+d.skipped+"件";' +
+    '  document.getElementById("s").textContent="✅ 完了！ 新規:"+d.added+"件 更新:"+d.updated+"件 スキップ:"+d.skipped+"件";' +
     '  document.getElementById("d").textContent="このウィンドウを閉じてください";' +
-    '  try{window.opener.postMessage("crm_ok_' + cnt + '","*");}catch(e){}' +
+    '  try{window.opener.postMessage("crm_ok_"+d.added+"_"+d.updated,"*");}catch(e){}' +
     '  setTimeout(function(){try{window.close();}catch(e){}},3000);' +
     '})' +
     '.catch(function(err){' +
@@ -253,16 +253,17 @@ javascript:(function(){
     if (typeof ev.data === 'string' && ev.data.indexOf('crm_ok_') === 0 && !done) {
       done = true;
       window.removeEventListener('message', onMsg);
-      alert('【CRM取込 完了】\n✅ ' + cnt + '件を送信しました。\n\nForesma取込シートを確認し、\n次に「Foresmaデータを取り込む」を実行してください。');
+      var parts = ev.data.replace('crm_ok_','').split('_');
+      var addedN = parts[0], updatedN = parts[1];
+      alert('【CRM取込 完了】\n✅ 新規登録: ' + addedN + '件\n🔄 情報補完（更新）: ' + updatedN + '件\n\nおもろいCRMを確認してください。');
     }
   }
   window.addEventListener('message', onMsg);
-  // 10秒後にメッセージが来なくても完了扱い（no-corsでopenerへのpostMessageが届かない場合）
   setTimeout(function(){
     if (!done) {
       done = true;
       window.removeEventListener('message', onMsg);
-      alert('【CRM取込】送信しました。\nForesma取込シートで結果を確認してください。');
+      alert('【CRM取込】送信しました。おもろいCRMを確認してください。');
     }
   }, 10000);
 
