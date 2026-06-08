@@ -416,6 +416,7 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
 // ========== Inline History Item ==========
 function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
   const [editing, setEditing] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [form, setForm] = useState({
     type: h.type ?? '電話',
     result: h.result ?? '',
@@ -424,6 +425,12 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
     nextDeadline: fmtInput(h.nextDeadline),
   })
   const [loading, setLoading] = useState(false)
+
+  const contentLines = (h.content ?? '').split('\n')
+  const isLong = contentLines.length > 3 || (h.content ?? '').length > 120
+  const previewText = isLong && !expanded
+    ? contentLines.slice(0, 3).join('\n').slice(0, 120)
+    : (h.content ?? '')
 
   async function handleSave() {
     setLoading(true)
@@ -487,7 +494,19 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
             </button>
           </div>
         </div>
-        {h.content && <p className="text-gray-700 leading-relaxed">{h.content}</p>}
+        {h.content && (
+          <div>
+            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
+              {previewText}{isLong && !expanded && '…'}
+            </p>
+            {isLong && (
+              <button onClick={() => setExpanded(e => !e)}
+                className="text-xs text-blue-500 hover:text-blue-700 mt-1">
+                {expanded ? '▲ 折りたたむ' : '▼ 続きを見る'}
+              </button>
+            )}
+          </div>
+        )}
         {h.nextContent && (
           <p className="text-xs text-blue-600 mt-1.5">
             次回: {h.nextContent}{h.nextDeadline && ` (${fmt(h.nextDeadline)})`}
