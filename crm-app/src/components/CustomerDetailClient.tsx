@@ -419,6 +419,7 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const [form, setForm] = useState({
     type: h.type ?? '電話',
+    date: fmtInput(h.date),
     result: h.result ?? '',
     content: h.content ?? '',
     nextContent: h.nextContent ?? '',
@@ -457,6 +458,8 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
         <select value={form.type} onChange={(e) => setForm(f => ({ ...f, type: e.target.value }))} className={inp}>
           {['電話', 'メール', '面談', 'その他'].map(t => <option key={t} value={t}>{t}</option>)}
         </select>
+        <input type="date" value={form.date} onChange={(e) => setForm(f => ({ ...f, date: e.target.value }))}
+          className={inp} />
         <input value={form.result} onChange={(e) => setForm(f => ({ ...f, result: e.target.value }))}
           placeholder="対応結果" className={inp} />
         <textarea value={form.content} onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))}
