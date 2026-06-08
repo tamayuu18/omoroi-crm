@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { format, isAfter, isToday, isThisWeek, parseISO } from 'date-fns'
 import { CheckSquare } from 'lucide-react'
 import type { Task } from '@/types'
-import { CA_OPTIONS } from '@/lib/constants'
+import { ASSIGNEE_OPTIONS } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 function fmt(d: Date | string | null | undefined) {
@@ -89,7 +89,7 @@ export function TasksClient() {
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">すべての作業担当者</option>
-          {CA_OPTIONS.map((ca) => <option key={ca} value={ca}>{ca}</option>)}
+          {ASSIGNEE_OPTIONS.map((ca) => <option key={ca} value={ca}>{ca}</option>)}
         </select>
         <select
           value={statusFilter}

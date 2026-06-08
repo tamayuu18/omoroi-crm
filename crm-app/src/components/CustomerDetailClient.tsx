@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History } from '@/types'
 import { ALL_STATUSES } from '@/types'
-import { CA_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS } from '@/lib/constants'
+import { CA_OPTIONS, ASSIGNEE_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS } from '@/lib/constants'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
@@ -445,7 +445,7 @@ function AddTaskModal({ customer, onClose, onUpdate }: ModalProps) {
             <label className="block text-sm font-medium text-gray-700 mb-1">作業担当者</label>
             <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inp}>
               <option value="">— 選択 —</option>
-              {CA_OPTIONS.map(ca => <option key={ca} value={ca}>{ca}</option>)}
+              {ASSIGNEE_OPTIONS.map(ca => <option key={ca} value={ca}>{ca}</option>)}
             </select>
           </div>
           <div>
@@ -637,6 +637,100 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
             次回: {h.nextContent}{h.nextDeadline && ` (${fmt(h.nextDeadline)})`}
           </p>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ========== Inline Task Item ==========
+function TaskItem({ t, onUpdate }: { t: Task; onUpdate: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({
+    content: t.content ?? '',
+    assignee: (t as any).assignee ?? '',
+    deadline: fmtInput(t.deadline),
+    priority: t.priority ?? '中',
+  })
+  const [loading, setLoading] = useState(false)
+
+  async function handleSave() {
+    setLoading(true)
+    try {
+      await fetch(`/api/tasks/${t.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      onUpdate()
+      setEditing(false)
+    } finally { setLoading(false) }
+  }
+
+  async function handleDelete() {
+    if (!confirm('このタスクを削除しますか？')) return
+    await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' })
+    onUpdate()
+  }
+
+  async function toggleStatus() {
+    const newStatus = t.status === '完了' ? '未完了' : '完了'
+    await fetch(`/api/tasks/${t.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    })
+    onUpdate()
+  }
+
+  if (editing) {
+    return (
+      <div className="border border-blue-200 rounded-lg p-3 text-sm bg-blue-50 space-y-2">
+        <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+          rows={2} className={inp + ' resize-none'} placeholder="タスク内容" />
+        <select value={form.assignee} onChange={e => setForm(f => ({ ...f, assignee: e.target.value }))} className={inp}>
+          <option value="">— 作業担当者 —</option>
+          {ASSIGNEE_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <input type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} className={inp} />
+        <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))} className={inp}>
+          {['高', '中', '低'].map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <div className="flex gap-2 justify-end">
+          <button onClick={handleDelete} className="px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded-lg border border-red-200">削除</button>
+          <button onClick={() => setEditing(false)} className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">
+            <X size={12} />キャンセル
+          </button>
+          <button onClick={handleSave} disabled={loading}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#0070D2] text-white rounded-lg disabled:opacity-50">
+            <Check size={12} />{loading ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm group hover:bg-gray-50">
+      <button onClick={toggleStatus} className="mt-0.5 shrink-0">
+        <CheckSquare size={18} className={t.status === '完了' ? 'text-green-500' : 'text-gray-300'} />
+      </button>
+      <div className="flex-1 min-w-0">
+        <p className={cn('font-medium', t.status === '完了' && 'line-through text-gray-400')}>{t.content}</p>
+        <div className="flex gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+          <span>期限: {fmt(t.deadline)}</span>
+          <span>優先度: {t.priority}</span>
+          {(t as any).assignee && <span>担当: {(t as any).assignee}</span>}
+        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className={cn('shrink-0 text-xs px-2 py-0.5 rounded-full',
+          t.status === '完了' ? 'bg-green-100 text-green-700' : 'bg-yellow-50 text-yellow-700')}>
+          {t.status}
+        </span>
+        <button onClick={() => setEditing(true)}
+          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-500 transition-opacity">
+          <Pencil size={12} />
+        </button>
       </div>
     </div>
   )
@@ -880,19 +974,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
                       return <HistoryItem key={`h-${item.data.id}`} h={item.data} onUpdate={fetchAll} />
                     }
                     if (item.kind === 'task') {
-                      const t = item.data
-                      return (
-                        <div key={`t-${t.id}`} className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm bg-yellow-50/40">
-                          <span className="text-lg shrink-0">✅</span>
-                          <div className="flex-1 min-w-0">
-                            <p className={cn('font-medium', t.status === '完了' && 'line-through text-gray-400')}>{t.content}</p>
-                            <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                              <span>期限: {fmt(t.deadline)}</span>
-                              <span className={cn('font-medium', t.status === '完了' ? 'text-green-600' : 'text-yellow-600')}>{t.status}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )
+                      return <TaskItem key={`t-${item.data.id}`} t={item.data} onUpdate={fetchAll} />
                     }
                     const m = item.data as Meeting
                     return (
@@ -934,25 +1016,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
                 </div>
               {tasks.length === 0 ? <EmptyState message="タスクがありません" /> : (
                 <div className="space-y-2">
-                  {tasks.map((t) => (
-                    <div key={t.id} className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg text-sm">
-                      <button onClick={() => toggleTaskStatus(t)} className="mt-0.5 shrink-0">
-                        <CheckSquare size={18} className={t.status === '完了' ? 'text-green-500' : 'text-gray-300'} />
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <p className={cn('font-medium', t.status === '完了' && 'line-through text-gray-400')}>{t.content}</p>
-                        <div className="flex gap-3 mt-1 text-xs text-gray-400 flex-wrap">
-                          <span>期限: {fmt(t.deadline)}</span>
-                          <span>優先度: {t.priority}</span>
-                          <span>{t.ca}</span>
-                        </div>
-                      </div>
-                      <span className={cn('shrink-0 text-xs px-2 py-0.5 rounded-full',
-                        t.status === '完了' ? 'bg-green-100 text-green-700' : 'bg-yellow-50 text-yellow-700')}>
-                        {t.status}
-                      </span>
-                    </div>
-                  ))}
+                  {tasks.map((t) => <TaskItem key={t.id} t={t} onUpdate={fetchAll} />)}
                 </div>
               )}
               </div>
