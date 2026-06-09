@@ -114,11 +114,24 @@ export function DashboardClient() {
   const unreachable = filtered.filter(c => c.status === '初回未対応').length
   const weekMeetings = meetings.filter(m => {
     if (!m.date) return false
+    if (m.status === 'キャンセル') return false
     try {
       const d = new Date(m.date as unknown as string)
       return isThisWeek(d, { weekStartsOn: 1 }) || isToday(d)
     } catch { return false }
   }).length
+
+  // Cancelled meetings in the last 7 days
+  const recentCancelled = meetings.filter(m => {
+    if (m.status !== 'キャンセル') return false
+    if (!m.date) return false
+    try {
+      const d = new Date(m.date as unknown as string)
+      const sevenDaysAgo = new Date()
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+      return d >= sevenDaysAgo
+    } catch { return false }
+  }).sort((a, b) => new Date(b.date as unknown as string).getTime() - new Date(a.date as unknown as string).getTime())
   const overdueTasks = tasks.filter(t => {
     if (t.status === '完了' || !t.deadline) return false
     try {
@@ -220,6 +233,33 @@ export function DashboardClient() {
         <KpiCard icon={<Calendar size={22} className="text-green-600" />} label="今週の面談数" value={weekMeetings} color="bg-green-50" />
         <KpiCard icon={<Clock size={22} className="text-red-500" />} label="期限切れタスク" value={overdueTasks} color="bg-red-50" />
       </div>
+
+      {/* キャンセル通知 */}
+      {recentCancelled.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <h2 className="font-bold text-red-700 mb-3 flex items-center gap-2">
+            <AlertCircle size={16} className="text-red-500" />
+            直近7日間のキャンセル（{recentCancelled.length}件）
+          </h2>
+          <div className="space-y-2">
+            {recentCancelled.map((m, i) => {
+              const dateStr = m.date
+                ? (() => { try { return format(new Date(m.date as unknown as string), 'M/d HH:mm') } catch { return String(m.date) } })()
+                : '—'
+              return (
+                <div key={i} className="flex items-center gap-3 text-sm bg-white rounded-lg px-3 py-2 shadow-sm">
+                  <span className="text-red-400 shrink-0">{dateStr}</span>
+                  <a href={`/customers/${m.customerId}`} className="font-medium text-blue-600 hover:underline">
+                    {customers.find(c => c.id === m.customerId)?.name || m.name || m.customerId}
+                  </a>
+                  {m.ca && <span className="text-gray-400 text-xs">{m.ca}</span>}
+                  <span className="ml-auto text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">キャンセル</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 月別ヨミ表 */}
       <div className="bg-white rounded-xl shadow-sm p-5">
