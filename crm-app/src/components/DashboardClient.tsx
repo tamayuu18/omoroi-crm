@@ -130,13 +130,26 @@ export function DashboardClient() {
   }
 
   function getMonthRevenue(month: string) {
-    return yomiCustomers
-      .filter(c => matchMonth(c, month))
-      .reduce((sum, c) => {
+    const breakdown = YOMI_RANKS.map(r => {
+      const customers = yomiCustomers.filter(c =>
+        matchMonth(c, month) &&
+        (r.rank === '未設定' ? !c.yomiRank : c.yomiRank === r.rank) &&
+        (parseFloat(c.expectedRevenue ?? '0') > 0 || parseFloat(c.feeRate ?? '0') > 0)
+      )
+      const revenue = customers.reduce((sum, c) => {
         const rev = parseFloat(c.expectedRevenue ?? '0') || 0
         const fee = parseFloat(c.feeRate ?? '0') || 0
         return sum + rev * fee / 100
       }, 0)
+      const totalRev = customers.reduce((sum, c) => sum + (parseFloat(c.expectedRevenue ?? '0') || 0), 0)
+      const totalFee = customers.length === 1
+        ? parseFloat(customers[0].feeRate ?? '0') || 0
+        : null
+      return { rank: r.rank, color: r.color, revenue, totalRev, totalFee, count: customers.length }
+    }).filter(r => r.revenue > 0 || r.totalRev > 0)
+
+    const total = breakdown.reduce((s, r) => s + r.revenue, 0)
+    return { total, breakdown }
   }
 
   return (
@@ -201,8 +214,38 @@ export function DashboardClient() {
                         )
                       })}
                       <td className="py-2 px-3 text-center font-bold text-gray-700">{total || '—'}</td>
-                      <td className="py-2 px-3 text-center text-sm text-gray-700">
-                        {(() => { const r = getMonthRevenue(month); return r > 0 ? `${Math.round(r)}万円` : '—' })()}
+                      <td className="py-2 px-3 text-center">
+                        {(() => {
+                          const { total, breakdown } = getMonthRevenue(month)
+                          if (total === 0) return <span className="text-gray-300">—</span>
+                          return (
+                            <div className="relative group inline-block">
+                              <span className="font-medium text-gray-800 cursor-default border-b border-dashed border-gray-400">
+                                {Math.round(total * 10) / 10}万円
+                              </span>
+                              {/* ツールチップ */}
+                              <div className="absolute z-50 bottom-full right-0 mb-2 hidden group-hover:block w-56
+                                bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 text-left">
+                                {breakdown.map(r => (
+                                  <div key={r.rank} className="flex items-center justify-between py-0.5">
+                                    <span className={cn('px-1.5 py-0.5 rounded text-xs font-bold mr-2 shrink-0',
+                                      r.color.replace('bg-', 'bg-').replace('text-', 'text-')
+                                    )}>{r.rank}</span>
+                                    <span className="text-gray-300 flex-1 text-right">
+                                      {r.totalFee !== null
+                                        ? `${r.totalRev}万 × ${r.totalFee}% = ${Math.round(r.revenue * 10) / 10}万円`
+                                        : `${Math.round(r.revenue * 10) / 10}万円`}
+                                    </span>
+                                  </div>
+                                ))}
+                                <div className="border-t border-gray-600 mt-1.5 pt-1.5 flex justify-between font-bold">
+                                  <span>期待値</span>
+                                  <span>{Math.round(total * 10) / 10}万円</span>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </td>
                     </tr>
                   )
