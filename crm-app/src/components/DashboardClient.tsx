@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { isAfter, isThisWeek, isToday, format } from 'date-fns'
 import { Users, AlertCircle, Calendar, Clock } from 'lucide-react'
 import type { Customer, Task, Meeting } from '@/types'
@@ -9,6 +9,56 @@ import { CA_OPTIONS } from '@/lib/constants'
 import { statusColors } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
+
+type RevenueBreakdown = { rank: string; color: string; revenue: number; totalRev: number; totalFee: number | null; count: number }
+
+function RevenueTooltip({ total, breakdown }: { total: number; breakdown: RevenueBreakdown[] }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  function handleMouseEnter() {
+    if (!ref.current) return
+    const rect = ref.current.getBoundingClientRect()
+    setPos({ x: rect.right, y: rect.top })
+  }
+
+  if (total === 0) return <span className="text-gray-300">—</span>
+
+  return (
+    <>
+      <span
+        ref={ref}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setPos(null)}
+        className="font-medium text-gray-800 cursor-default border-b border-dashed border-gray-400"
+      >
+        {Math.round(total * 10) / 10}万円
+      </span>
+      {pos && (
+        <div
+          className="fixed z-[9999] w-60 bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3"
+          style={{ top: pos.y - 8, right: window.innerWidth - pos.x + 8, transform: 'translateY(-100%)' }}
+          onMouseLeave={() => setPos(null)}
+        >
+          {breakdown.map(r => (
+            <div key={r.rank} className="flex items-center gap-2 py-0.5">
+              <span className={cn('px-1.5 py-0.5 rounded text-xs font-bold shrink-0', r.color)}>{r.rank}</span>
+              <span className="text-gray-300 flex-1 text-right">
+                {r.totalFee !== null
+                  ? `${r.totalRev}万 × ${r.totalFee}% = ${Math.round(r.revenue * 10) / 10}万円`
+                  : `${Math.round(r.revenue * 10) / 10}万円`}
+              </span>
+            </div>
+          ))}
+          <div className="border-t border-gray-600 mt-1.5 pt-1.5 flex justify-between font-bold">
+            <span>期待値</span>
+            <span>{Math.round(total * 10) / 10}万円</span>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number | string; color: string }) {
   return (
@@ -217,34 +267,7 @@ export function DashboardClient() {
                       <td className="py-2 px-3 text-center">
                         {(() => {
                           const { total, breakdown } = getMonthRevenue(month)
-                          if (total === 0) return <span className="text-gray-300">—</span>
-                          return (
-                            <div className="relative group inline-block">
-                              <span className="font-medium text-gray-800 cursor-default border-b border-dashed border-gray-400">
-                                {Math.round(total * 10) / 10}万円
-                              </span>
-                              {/* ツールチップ */}
-                              <div className="absolute z-50 bottom-full right-0 mb-2 hidden group-hover:block w-56
-                                bg-gray-900 text-white text-xs rounded-lg shadow-xl p-3 text-left">
-                                {breakdown.map(r => (
-                                  <div key={r.rank} className="flex items-center justify-between py-0.5">
-                                    <span className={cn('px-1.5 py-0.5 rounded text-xs font-bold mr-2 shrink-0',
-                                      r.color.replace('bg-', 'bg-').replace('text-', 'text-')
-                                    )}>{r.rank}</span>
-                                    <span className="text-gray-300 flex-1 text-right">
-                                      {r.totalFee !== null
-                                        ? `${r.totalRev}万 × ${r.totalFee}% = ${Math.round(r.revenue * 10) / 10}万円`
-                                        : `${Math.round(r.revenue * 10) / 10}万円`}
-                                    </span>
-                                  </div>
-                                ))}
-                                <div className="border-t border-gray-600 mt-1.5 pt-1.5 flex justify-between font-bold">
-                                  <span>期待値</span>
-                                  <span>{Math.round(total * 10) / 10}万円</span>
-                                </div>
-                              </div>
-                            </div>
-                          )
+                          return <RevenueTooltip total={total} breakdown={breakdown} />
                         })()}
                       </td>
                     </tr>
