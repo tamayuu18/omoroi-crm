@@ -37,6 +37,7 @@ model Customer {
   expectedRevenue    String?
   feeRate            String?
   note         String?
+  recommendation     String?
 
   tasks    Task[]
   meetings Meeting[]

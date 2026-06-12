@@ -121,6 +121,7 @@ export async function GET() {
     await prisma.$executeRaw`ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "feeRate" TEXT`
     await prisma.$executeRaw`ALTER TABLE "History" ADD COLUMN IF NOT EXISTS "createdBy" TEXT`
     await prisma.$executeRaw`ALTER TABLE "Task" ADD COLUMN IF NOT EXISTS "assignee" TEXT`
+    await prisma.$executeRaw`ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "recommendation" TEXT`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Customer_status_idx" ON "Customer"("status")`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Customer_ca_idx" ON "Customer"("ca")`
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "Task_customerId_idx" ON "Task"("customerId")`
