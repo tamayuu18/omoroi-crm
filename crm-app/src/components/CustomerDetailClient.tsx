@@ -751,7 +751,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showLreachModal, setShowLreachModal] = useState(false)
   const [editingRecommendation, setEditingRecommendation] = useState(false)
-  const [recommendationText, setRecommendationText] = useState((customer as any).recommendation ?? '')
+  const [recommendationText, setRecommendationText] = useState('')
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
