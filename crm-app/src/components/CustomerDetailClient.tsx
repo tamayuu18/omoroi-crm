@@ -948,63 +948,6 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
           )}
         </div>
 
-        {/* 推薦文セクション */}
-        <div className="lg:col-span-3 bg-white rounded-xl shadow-sm p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-bold text-gray-700 flex items-center gap-2">
-              <span>📝</span> 推薦文
-            </h2>
-            {!editingRecommendation && (
-              <button
-                onClick={() => { setRecommendationText((customer as any).recommendation ?? ''); setEditingRecommendation(true) }}
-                className="text-xs text-blue-600 hover:underline"
-              >
-                {(customer as any).recommendation ? '編集' : '+ 追加'}
-              </button>
-            )}
-          </div>
-          {editingRecommendation ? (
-            <div className="space-y-2">
-              <textarea
-                value={recommendationText}
-                onChange={e => setRecommendationText(e.target.value)}
-                rows={6}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
-                placeholder="推薦文を入力してください..."
-                autoFocus
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={() => setEditingRecommendation(false)}
-                  className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={async () => {
-                    await fetch(`/api/customers/${customerId}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ recommendation: recommendationText }),
-                    })
-                    setCustomer(prev => prev ? { ...prev, recommendation: recommendationText } as any : prev)
-                    setEditingRecommendation(false)
-                  }}
-                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  保存
-                </button>
-              </div>
-            </div>
-          ) : (
-            (customer as any).recommendation ? (
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(customer as any).recommendation}</p>
-            ) : (
-              <p className="text-sm text-gray-400">推薦文が未登録です。「+ 追加」から入力してください。</p>
-            )
-          )}
-        </div>
-
         {/* Right: Tabs */}
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="flex border-b border-gray-200">
@@ -1109,6 +1052,63 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
             )}
           </div>
         </div>
+      </div>
+
+      {/* 推薦文セクション */}
+      <div className="bg-white rounded-xl shadow-sm p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-bold text-gray-700 flex items-center gap-2">
+            <span>📝</span> 推薦文
+          </h2>
+          {!editingRecommendation && (
+            <button
+              onClick={() => { setRecommendationText((customer as any).recommendation ?? ''); setEditingRecommendation(true) }}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              {(customer as any).recommendation ? '編集' : '+ 追加'}
+            </button>
+          )}
+        </div>
+        {editingRecommendation ? (
+          <div className="space-y-2">
+            <textarea
+              value={recommendationText}
+              onChange={e => setRecommendationText(e.target.value)}
+              rows={6}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+              placeholder="推薦文を入力してください..."
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setEditingRecommendation(false)}
+                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={async () => {
+                  await fetch(`/api/customers/${customerId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ recommendation: recommendationText }),
+                  })
+                  setCustomer(prev => prev ? { ...prev, recommendation: recommendationText } as any : prev)
+                  setEditingRecommendation(false)
+                }}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        ) : (
+          (customer as any).recommendation ? (
+            <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(customer as any).recommendation}</p>
+          ) : (
+            <p className="text-sm text-gray-400">推薦文が未登録です。「+ 追加」から入力してください。</p>
+          )
+        )}
       </div>
 
       {showStatusModal && <StatusChangeModal customer={customer} onClose={() => setShowStatusModal(false)} onUpdate={fetchAll} />}
