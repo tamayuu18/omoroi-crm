@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
@@ -738,6 +739,7 @@ function TaskItem({ t, onUpdate }: { t: Task; onUpdate: () => void }) {
 
 // ========== Main Component ==========
 export function CustomerDetailClient({ customerId }: { customerId: string }) {
+  const router = useRouter()
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [meetings, setMeetings] = useState<Meeting[]>([])
@@ -836,9 +838,9 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
 
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6 space-y-4">
-      <Link href="/customers" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 w-fit">
+      <button onClick={() => router.back()} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 w-fit">
         <ChevronLeft size={16} />顧客一覧に戻る
-      </Link>
+      </button>
 
       {/* Top card */}
       <div className="bg-white rounded-xl shadow-sm p-6">
