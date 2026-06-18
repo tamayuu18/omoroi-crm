@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { format, isAfter, parseISO } from 'date-fns'
 import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
@@ -145,15 +146,19 @@ function BulkStatusModal({ count, onApply, onClose }: { count: number; onApply: 
 
 // ========== Main ==========
 export function CustomerListClient() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [caFilter, setCaFilter] = useState('')
-  const [yomiFilter, setYomiFilter] = useState('')
-  const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState('updatedAt')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('statusFilter') ?? '')
+  const [caFilter, setCaFilter] = useState(searchParams.get('caFilter') ?? '')
+  const [yomiFilter, setYomiFilter] = useState(searchParams.get('yomiFilter') ?? '')
+  const [search, setSearch] = useState(searchParams.get('search') ?? '')
+  const [sortBy, setSortBy] = useState(searchParams.get('sortBy') ?? 'updatedAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>((searchParams.get('sortDir') as 'asc' | 'desc') ?? 'desc')
 
   // New customer modal
   const [showModal, setShowModal] = useState(false)
@@ -171,6 +176,19 @@ export function CustomerListClient() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showBulkStatus, setShowBulkStatus] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
+
+  // URL にフィルタ・ソート状態を保持（戻ったときに復元）
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('statusFilter', statusFilter)
+    if (caFilter) params.set('caFilter', caFilter)
+    if (yomiFilter) params.set('yomiFilter', yomiFilter)
+    if (search) params.set('search', search)
+    if (sortBy !== 'updatedAt') params.set('sortBy', sortBy)
+    if (sortDir !== 'desc') params.set('sortDir', sortDir)
+    const qs = params.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, pathname, router])
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)

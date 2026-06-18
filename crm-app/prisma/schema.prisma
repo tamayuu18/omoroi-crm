@@ -38,6 +38,7 @@ model Customer {
   feeRate            String?
   note         String?
   recommendation     String?
+  photoUrl           String?
 
   tasks    Task[]
   meetings Meeting[]

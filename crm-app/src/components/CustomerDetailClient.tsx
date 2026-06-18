@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
-  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check, Download
+  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check, Download, Camera
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History } from '@/types'
 import { ALL_STATUSES } from '@/types'
@@ -843,13 +843,44 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       {/* Top card */}
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="flex flex-wrap items-start gap-4 justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1>
-            {customer.kana && <p className="text-sm text-gray-400">{customer.kana}</p>}
-            <div className="flex flex-wrap gap-2 mt-2 items-center">
-              <StatusBadge status={customer.status} size="md" />
-              {customer.yomiRank && <YomiRankBadge rank={customer.yomiRank} />}
-              <span className="text-sm text-gray-500">担当: {customer.ca || '—'}</span>
+          <div className="flex items-start gap-4">
+            {/* 証明写真 */}
+            <label className="shrink-0 cursor-pointer group relative">
+              <div className="w-16 h-20 rounded-lg border-2 border-dashed border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50 group-hover:border-blue-400 transition-colors">
+                {(customer as any).photoUrl ? (
+                  <img src={(customer as any).photoUrl} alt="証明写真" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex flex-col items-center gap-1 text-gray-300 group-hover:text-blue-400 transition-colors">
+                    <Camera size={20} />
+                    <span className="text-[9px]">写真</span>
+                  </div>
+                )}
+              </div>
+              <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                if (file.size > 2 * 1024 * 1024) { alert('2MB以下の画像を選択してください'); return }
+                const reader = new FileReader()
+                reader.onload = async () => {
+                  const dataUrl = reader.result as string
+                  await fetch(`/api/customers/${customerId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ photoUrl: dataUrl }),
+                  })
+                  setCustomer(prev => prev ? { ...prev, photoUrl: dataUrl } as any : prev)
+                }
+                reader.readAsDataURL(file)
+              }} />
+            </label>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1>
+              {customer.kana && <p className="text-sm text-gray-400">{customer.kana}</p>}
+              <div className="flex flex-wrap gap-2 mt-2 items-center">
+                <StatusBadge status={customer.status} size="md" />
+                {customer.yomiRank && <YomiRankBadge rank={customer.yomiRank} />}
+                <span className="text-sm text-gray-500">担当: {customer.ca || '—'}</span>
+              </div>
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
