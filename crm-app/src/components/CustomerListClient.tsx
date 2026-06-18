@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { format, isAfter, parseISO } from 'date-fns'
 import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
@@ -143,20 +144,21 @@ function BulkStatusModal({ count, onApply, onClose }: { count: number; onApply: 
   )
 }
 
-const SS_KEY = 'customerListState'
+// ========== Main (inner, uses useSearchParams) ==========
+function CustomerListInner() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
 
-// ========== Main ==========
-export function CustomerListClient() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [caFilter, setCaFilter] = useState('')
-  const [yomiFilter, setYomiFilter] = useState('')
-  const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState('updatedAt')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [restored, setRestored] = useState(false)
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('sf') ?? '')
+  const [caFilter, setCaFilter] = useState(searchParams.get('ca') ?? '')
+  const [yomiFilter, setYomiFilter] = useState(searchParams.get('yr') ?? '')
+  const [search, setSearch] = useState(searchParams.get('q') ?? '')
+  const [sortBy, setSortBy] = useState(searchParams.get('sb') ?? 'updatedAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>((searchParams.get('sd') as 'asc' | 'desc') ?? 'desc')
 
   // New customer modal
   const [showModal, setShowModal] = useState(false)
@@ -175,25 +177,18 @@ export function CustomerListClient() {
   const [showBulkStatus, setShowBulkStatus] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
 
-  // マウント時にsessionStorageから復元
+  // 状態が変わったらURLに保存
   useEffect(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(SS_KEY) ?? '{}')
-      if (saved.statusFilter) setStatusFilter(saved.statusFilter)
-      if (saved.caFilter) setCaFilter(saved.caFilter)
-      if (saved.yomiFilter) setYomiFilter(saved.yomiFilter)
-      if (saved.search) setSearch(saved.search)
-      if (saved.sortBy) setSortBy(saved.sortBy)
-      if (saved.sortDir) setSortDir(saved.sortDir)
-    } catch {}
-    setRestored(true)
-  }, [])
-
-  // 状態が変わったらsessionStorageに保存
-  useEffect(() => {
-    if (!restored) return
-    sessionStorage.setItem(SS_KEY, JSON.stringify({ statusFilter, caFilter, yomiFilter, search, sortBy, sortDir }))
-  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, restored])
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('sf', statusFilter)
+    if (caFilter) params.set('ca', caFilter)
+    if (yomiFilter) params.set('yr', yomiFilter)
+    if (search) params.set('q', search)
+    if (sortBy !== 'updatedAt') params.set('sb', sortBy)
+    if (sortDir !== 'desc') params.set('sd', sortDir)
+    const qs = params.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, pathname, router])
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
@@ -217,7 +212,7 @@ export function CustomerListClient() {
     }
   }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir])
 
-  useEffect(() => { if (restored) fetchCustomers() }, [fetchCustomers, restored])
+  useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
   function toggleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -565,6 +560,14 @@ export function CustomerListClient() {
         </div>
       )}
     </div>
+  )
+}
+
+export function CustomerListClient() {
+  return (
+    <Suspense fallback={<div className="max-w-screen-xl mx-auto px-4 py-6"><div className="animate-pulse h-64 bg-white rounded-xl" /></div>}>
+      <CustomerListInner />
+    </Suspense>
   )
 }
 
