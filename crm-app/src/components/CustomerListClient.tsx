@@ -144,23 +144,19 @@ function BulkStatusModal({ count, onApply, onClose }: { count: number; onApply: 
 }
 
 const SS_KEY = 'customerListState'
-function loadState() {
-  if (typeof window === 'undefined') return {}
-  try { return JSON.parse(sessionStorage.getItem(SS_KEY) ?? '{}') } catch { return {} }
-}
 
 // ========== Main ==========
 export function CustomerListClient() {
-  const saved = loadState()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState(saved.statusFilter ?? '')
-  const [caFilter, setCaFilter] = useState(saved.caFilter ?? '')
-  const [yomiFilter, setYomiFilter] = useState(saved.yomiFilter ?? '')
-  const [search, setSearch] = useState(saved.search ?? '')
-  const [sortBy, setSortBy] = useState(saved.sortBy ?? 'updatedAt')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(saved.sortDir ?? 'desc')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [caFilter, setCaFilter] = useState('')
+  const [yomiFilter, setYomiFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState('updatedAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [restored, setRestored] = useState(false)
 
   // New customer modal
   const [showModal, setShowModal] = useState(false)
@@ -179,10 +175,25 @@ export function CustomerListClient() {
   const [showBulkStatus, setShowBulkStatus] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
 
-  // sessionStorage にフィルタ・ソート状態を保持（戻ったときに復元）
+  // マウント時にsessionStorageから復元
   useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SS_KEY) ?? '{}')
+      if (saved.statusFilter) setStatusFilter(saved.statusFilter)
+      if (saved.caFilter) setCaFilter(saved.caFilter)
+      if (saved.yomiFilter) setYomiFilter(saved.yomiFilter)
+      if (saved.search) setSearch(saved.search)
+      if (saved.sortBy) setSortBy(saved.sortBy)
+      if (saved.sortDir) setSortDir(saved.sortDir)
+    } catch {}
+    setRestored(true)
+  }, [])
+
+  // 状態が変わったらsessionStorageに保存
+  useEffect(() => {
+    if (!restored) return
     sessionStorage.setItem(SS_KEY, JSON.stringify({ statusFilter, caFilter, yomiFilter, search, sortBy, sortDir }))
-  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir])
+  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, restored])
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
@@ -206,7 +217,7 @@ export function CustomerListClient() {
     }
   }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir])
 
-  useEffect(() => { fetchCustomers() }, [fetchCustomers])
+  useEffect(() => { if (restored) fetchCustomers() }, [fetchCustomers, restored])
 
   function toggleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
