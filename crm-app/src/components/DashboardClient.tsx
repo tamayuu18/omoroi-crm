@@ -155,7 +155,7 @@ export function DashboardClient() {
   // ========== 月別ヨミ表 ==========
   type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null; expectedRevenue?: string | null; feeRate?: string | null }
   // expectedCloseMonth または yomiRank があれば対象
-  const yomiCustomers = (filtered as YomiCustomer[]).filter(c => c.expectedCloseMonth || c.yomiRank)
+  const yomiCustomers = (filtered as YomiCustomer[]).filter(c => (c.expectedCloseMonth || c.yomiRank) && c.status !== '失注')
 
   const thisMonth = format(new Date(), 'yyyy-MM')
   const futureMonths = Array.from({ length: 6 }, (_, i) => {
