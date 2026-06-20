@@ -501,10 +501,6 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
         return
       }
       onClose()
-      // デバッグ: 保存後にDB件数を確認
-      const check = await fetch(`/api/history/${customer.id}`, { cache: 'no-store' })
-      const items = await check.json()
-      alert(`DB件数: ${Array.isArray(items) ? items.length : 'エラー: ' + JSON.stringify(items)}`)
       window.location.reload()
     } finally { setLoading(false) }
   }

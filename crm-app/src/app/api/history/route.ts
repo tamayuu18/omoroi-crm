@@ -14,9 +14,12 @@ export async function POST(request: NextRequest) {
     if (body.date && typeof body.date === 'string') {
       body.date = new Date(body.date)
     }
-    if (body.nextDeadline && typeof body.nextDeadline === 'string') {
+    if (body.nextDeadline && typeof body.nextDeadline === 'string' && body.nextDeadline.trim() !== '') {
       body.nextDeadline = new Date(body.nextDeadline)
+    } else {
+      body.nextDeadline = null
     }
+    if (body.nextContent === '') body.nextContent = null
     body.createdBy = session.user?.name ?? null
     const history = await addHistory(body)
     // 次回アクション・期限を顧客レコードにも反映
