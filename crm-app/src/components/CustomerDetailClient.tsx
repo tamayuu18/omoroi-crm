@@ -763,11 +763,12 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
+      const nc = { cache: 'no-store' as const }
       const [cRes, tRes, mRes, hRes] = await Promise.all([
-        fetch(`/api/customers/${customerId}`),
-        fetch(`/api/tasks?customerId=${customerId}`),
-        fetch(`/api/meetings?customerId=${customerId}`),
-        fetch(`/api/history/${customerId}`),
+        fetch(`/api/customers/${customerId}`, nc),
+        fetch(`/api/tasks?customerId=${customerId}`, nc),
+        fetch(`/api/meetings?customerId=${customerId}`, nc),
+        fetch(`/api/history/${customerId}`, nc),
       ])
       if (cRes.ok) setCustomer(await cRes.json())
       if (tRes.ok) setTasks(await tRes.json())
