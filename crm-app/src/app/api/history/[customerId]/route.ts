@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getHistory } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(
   _req: NextRequest,
   ctx: RouteContext<'/api/history/[customerId]'>
