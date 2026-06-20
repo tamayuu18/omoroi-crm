@@ -45,7 +45,7 @@ function historyIcon(type: string | null | undefined) {
 interface ModalProps {
   customer: Customer
   onClose: () => void
-  onUpdate: () => void
+  onUpdate: () => Promise<void>
 }
 
 // ========== Status Modal ==========
@@ -500,8 +500,8 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
         alert('保存に失敗しました: ' + (err.error ?? res.status))
         return
       }
-      onUpdate()
       onClose()
+      await onUpdate()
     } finally { setLoading(false) }
   }
 
@@ -760,8 +760,8 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [editingRecommendation, setEditingRecommendation] = useState(false)
   const [recommendationText, setRecommendationText] = useState('')
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  const fetchAll = useCallback(async (initial = false) => {
+    if (initial) setLoading(true)
     try {
       const nc = { cache: 'no-store' as const }
       const [cRes, tRes, mRes, hRes] = await Promise.all([
@@ -777,10 +777,10 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
         const h = await hRes.json() as History[]
         setHistory(h.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
       }
-    } finally { setLoading(false) }
+    } finally { if (initial) setLoading(false) }
   }, [customerId])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => { fetchAll(true) }, [fetchAll])
 
   async function toggleTaskStatus(task: Task) {
     const newStatus = task.status === '完了' ? '未完了' : '完了'
