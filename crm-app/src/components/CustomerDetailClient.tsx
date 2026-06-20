@@ -484,7 +484,7 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
   async function handleSubmit() {
     setLoading(true)
     try {
-      await fetch('/api/history', {
+      const res = await fetch('/api/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -495,6 +495,11 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
           type, result, content, nextContent, nextDeadline,
         }),
       })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert('保存に失敗しました: ' + (err.error ?? res.status))
+        return
+      }
       onUpdate()
       onClose()
     } finally { setLoading(false) }
