@@ -501,7 +501,7 @@ function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
         return
       }
       onClose()
-      await onUpdate()
+      window.location.reload()
     } finally { setLoading(false) }
   }
 
