@@ -22,9 +22,16 @@ export async function getCustomers(filters?: { status?: string; ca?: string; yom
     updatedAt: { updatedAt: dir },
     nextDeadline: { nextDeadline: dir },
     status: { status: dir },
+    firstMeeting: { meetings: { _min: { date: dir } } },
   }
   const orderBy = validSorts[filters?.sortBy ?? ''] ?? { updatedAt: 'desc' }
-  return prisma.customer.findMany({ where, orderBy })
+  return prisma.customer.findMany({
+    where,
+    orderBy,
+    include: {
+      meetings: { orderBy: { date: 'asc' }, take: 1, select: { date: true } },
+    },
+  })
 }
 
 export async function getCustomerById(id: string) {

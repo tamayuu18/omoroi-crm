@@ -428,6 +428,7 @@ function CustomerListInner() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('status')}>ステータス<SortIcon col="status" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">担当CA</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('registeredAt')}>送客日<SortIcon col="registeredAt" /></th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('firstMeeting')}>初回面談日<SortIcon col="firstMeeting" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">次回アクション</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('nextDeadline')}>次回期限<SortIcon col="nextDeadline" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">ヨミ</th>
@@ -452,6 +453,7 @@ function CustomerListInner() {
                     <td className="px-4 py-3" onClick={() => { window.location.href = `/customers/${c.id}` }}><StatusBadge status={c.status} /></td>
                     <td className="px-4 py-3 text-gray-700" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.ca}</td>
                     <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{formatDate(c.registeredAt)}</td>
+                    <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{(c as any).meetings?.[0]?.date ? formatDate((c as any).meetings[0].date) : '—'}</td>
                     <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.nextAction}</td>
                     <td className={cn('px-4 py-3 font-medium', overdue ? 'text-red-600' : 'text-gray-700')} onClick={() => { window.location.href = `/customers/${c.id}` }}>
                       {formatDate(c.nextDeadline)}
