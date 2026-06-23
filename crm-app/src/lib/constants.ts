@@ -1,4 +1,4 @@
-export const CA_OPTIONS = ['安井琢真', '濱野翔', '大田一輝', '岸田拓巳', '岩田珠優', '笠原拓実', '岸正平', '新彩菜']
+export const CA_OPTIONS = ['安井琢真', '濱野翔', '大田一輝', '岸田拓巳', '岩田珠優', '笠原拓実', '岸正平', '新彩菜', '小宮拓真']
 
 export const ASSIGNEE_OPTIONS = [...CA_OPTIONS, 'Bo川口', 'Bo大川']
 
