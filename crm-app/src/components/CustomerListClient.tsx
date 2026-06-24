@@ -320,6 +320,41 @@ function CustomerListInner() {
     }
   }
 
+  // 次回予定を完了にしてクリア
+  const [completingId, setCompletingId] = useState<string | null>(null)
+  const handleCompleteNext = async (c: Customer) => {
+    if (!c.nextAction && !c.nextDeadline) return
+    if (!confirm(`「${c.nextAction || formatDate(c.nextDeadline)}」を完了にして次回予定から消しますか？`)) return
+    setCompletingId(c.id)
+    // 楽観的更新
+    setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, nextAction: null, nextDeadline: null } : x))
+    try {
+      // 完了記録を履歴に残す（失敗しても致命的ではない）
+      fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: c.id,
+          name: c.name,
+          ca: c.ca ?? null,
+          type: '完了',
+          content: `次回アクション「${c.nextAction ?? ''}」を完了`,
+        }),
+      }).catch(() => {})
+      const res = await fetch(`/api/customers/${c.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextAction: null, nextDeadline: null }),
+      })
+      if (!res.ok) throw new Error('Failed')
+    } catch {
+      alert('完了処理に失敗しました')
+      await fetchCustomers()
+    } finally {
+      setCompletingId(null)
+    }
+  }
+
   function toggleSelect(id: string) {
     setSelected(prev => {
       const next = new Set(prev)
@@ -454,7 +489,21 @@ function CustomerListInner() {
                     <td className="px-4 py-3 text-gray-700" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.ca}</td>
                     <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{formatDate(c.registeredAt)}</td>
                     <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{(c as any).meetings?.[0]?.date ? formatDate((c as any).meetings[0].date) : '—'}</td>
-                    <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.nextAction}</td>
+                    <td className="px-4 py-3 text-gray-700 max-w-[220px]" onClick={() => { window.location.href = `/customers/${c.id}` }}>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate">{c.nextAction}</span>
+                        {(c.nextAction || c.nextDeadline) && (
+                          <button
+                            title="完了にして次回予定から消す"
+                            disabled={completingId === c.id}
+                            onClick={(e) => { e.stopPropagation(); handleCompleteNext(c) }}
+                            className="shrink-0 inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-2 py-1 disabled:opacity-50 transition-colors"
+                          >
+                            <Check size={12} />完了
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td className={cn('px-4 py-3 font-medium', overdue ? 'text-red-600' : 'text-gray-700')} onClick={() => { window.location.href = `/customers/${c.id}` }}>
                       {formatDate(c.nextDeadline)}
                       {overdue && <span className="ml-1 text-xs">(!)</span>}
