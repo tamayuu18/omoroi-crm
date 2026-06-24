@@ -16,22 +16,38 @@ export async function getCustomers(filters?: { status?: string; ca?: string; yom
     ]
   }
   const dir = filters?.sortDir === 'asc' ? 'asc' : 'desc'
+  // Prisma does not support ordering findMany by a related model's _min/_max
+  // aggregate, so 初回面談日 (firstMeeting) is sorted in memory below.
   const validSorts: Record<string, any> = {
     name: { name: dir },
     registeredAt: { registeredAt: dir },
     updatedAt: { updatedAt: dir },
     nextDeadline: { nextDeadline: dir },
     status: { status: dir },
-    firstMeeting: { meetings: { _min: { date: dir } } },
   }
   const orderBy = validSorts[filters?.sortBy ?? ''] ?? { updatedAt: 'desc' }
-  return prisma.customer.findMany({
+  const customers = await prisma.customer.findMany({
     where,
     orderBy,
     include: {
       meetings: { orderBy: { date: 'asc' }, take: 1, select: { date: true } },
     },
   })
+
+  if (filters?.sortBy === 'firstMeeting') {
+    const factor = dir === 'asc' ? 1 : -1
+    customers.sort((a, b) => {
+      const aDate = a.meetings[0]?.date
+      const bDate = b.meetings[0]?.date
+      // Customers without a meeting date sort to the end regardless of direction.
+      if (!aDate && !bDate) return 0
+      if (!aDate) return 1
+      if (!bDate) return -1
+      return (aDate.getTime() - bDate.getTime()) * factor
+    })
+  }
+
+  return customers
 }
 
 export async function getCustomerById(id: string) {
