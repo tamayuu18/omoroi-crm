@@ -1,6 +1,20 @@
-import type { Customer as PrismaCustomer, Task, Meeting, History as PrismaHistory, Yomi } from '@prisma/client'
+import type { Customer as PrismaCustomer, Task, Meeting, History as PrismaHistory, Yomi, Job, JobProposal } from '@prisma/client'
 
-export type { Task, Meeting, Yomi }
+export type { Task, Meeting, Yomi, Job, JobProposal }
+
+// 提案に紐づく求人情報を含めた表示用の型
+export type JobProposalWithJob = JobProposal & { job: Job }
+
+// CA別KPI集計の1行
+export type KpiRow = {
+  ca: string
+  meetingsSet: number      // 面談設定数
+  firstMeetings: number    // 初回面談数
+  proposals: number        // 求人提案数
+  selections: number       // 選考数
+  offers: number           // 内定数
+  accepted: number         // 内定承諾数
+}
 
 export type Customer = PrismaCustomer & {
   expectedRevenue?: string | null

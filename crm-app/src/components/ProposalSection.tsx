@@ -1,0 +1,133 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Plus, Trash2, ExternalLink } from 'lucide-react'
+import type { Job, JobProposalWithJob } from '@/types'
+import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
+import { cn } from '@/lib/utils'
+
+const statusColor = (s: string) =>
+  PROPOSAL_OFFER_STATUSES.includes(s) ? 'bg-purple-100 text-purple-700'
+  : s === '承諾' ? 'bg-green-100 text-green-700'
+  : ['辞退', '見送り'].includes(s) ? 'bg-gray-100 text-gray-500'
+  : s === '提案' ? 'bg-blue-50 text-blue-600'
+  : 'bg-amber-50 text-amber-700'
+
+export function ProposalSection({
+  customerId, ca, proposals, onUpdate,
+}: {
+  customerId: string
+  ca: string | null
+  proposals: JobProposalWithJob[]
+  onUpdate: () => void
+}) {
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [adding, setAdding] = useState(false)
+  const [selectedJob, setSelectedJob] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/jobs?status=募集中', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : []))
+      .then(setJobs)
+      .catch(() => {})
+  }, [])
+
+  async function addProposal() {
+    if (!selectedJob) return
+    setSaving(true)
+    try {
+      await fetch('/api/proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId, jobId: selectedJob, ca, status: '提案' }),
+      })
+      setSelectedJob('')
+      setAdding(false)
+      onUpdate()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function changeStatus(id: string, status: string) {
+    await fetch(`/api/proposals/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    })
+    onUpdate()
+  }
+
+  async function remove(p: JobProposalWithJob) {
+    if (!confirm(`「${p.job.company} / ${p.job.title}」の提案を削除しますか？`)) return
+    await fetch(`/api/proposals/${p.id}`, { method: 'DELETE' })
+    onUpdate()
+  }
+
+  // 既に提案済みの求人は候補から除外
+  const proposedJobIds = new Set(proposals.map(p => p.jobId))
+  const availableJobs = jobs.filter(j => !proposedJobIds.has(j.id))
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button onClick={() => setAdding(v => !v)}
+          className="flex items-center gap-1.5 text-sm bg-[#0070D2] text-white px-3 py-1.5 rounded-lg hover:bg-[#005fb2]">
+          <Plus size={15} /> 求人を提案
+        </button>
+      </div>
+
+      {adding && (
+        <div className="border border-blue-100 bg-blue-50/50 rounded-lg p-3 flex gap-2 items-center">
+          <select value={selectedJob} onChange={e => setSelectedJob(e.target.value)}
+            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            <option value="">求人を選択（募集中）</option>
+            {availableJobs.map(j => <option key={j.id} value={j.id}>{j.company} / {j.title}</option>)}
+          </select>
+          <button onClick={addProposal} disabled={!selectedJob || saving}
+            className="shrink-0 bg-[#0070D2] text-white px-3 py-2 rounded-lg text-sm hover:bg-[#005fb2] disabled:opacity-50">
+            追加
+          </button>
+        </div>
+      )}
+      {adding && availableJobs.length === 0 && (
+        <p className="text-xs text-gray-400">提案できる募集中の求人がありません。「求人」ページで登録してください。</p>
+      )}
+
+      {proposals.length === 0 ? (
+        <div className="text-center text-gray-400 text-sm py-8">提案した求人がありません</div>
+      ) : (
+        <div className="space-y-2">
+          {proposals.map(p => (
+            <div key={p.id} className="border border-gray-100 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-gray-900 text-sm">{p.job.title}</div>
+                  <div className="text-xs text-gray-500">{p.job.company}</div>
+                  <div className="text-xs text-gray-400 mt-1 flex gap-3 flex-wrap">
+                    {p.job.salary && <span>💴 {p.job.salary}</span>}
+                    {p.job.area && <span>📍 {p.job.area.split('\n')[0]}</span>}
+                    {p.job.sourceUrl && (
+                      <a href={p.job.sourceUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline flex items-center gap-0.5">
+                        求人票 <ExternalLink size={11} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <select value={p.status} onChange={e => changeStatus(p.id, e.target.value)}
+                    className={cn('text-xs rounded-full px-2 py-1 border-0 cursor-pointer font-medium', statusColor(p.status))}>
+                    {PROPOSAL_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <button onClick={() => remove(p)} className="p-1 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

@@ -40,13 +40,56 @@ model Customer {
   recommendation     String?
   photoUrl           String?
 
-  tasks    Task[]
-  meetings Meeting[]
-  history  History[]
-  yomi     Yomi[]
+  tasks     Task[]
+  meetings  Meeting[]
+  history   History[]
+  yomi      Yomi[]
+  proposals JobProposal[]
 
   @@index([status])
   @@index([ca])
+}
+
+// 求人マスタ
+model Job {
+  id        String   @id @default(cuid())
+  company   String          // 企業名
+  title     String          // 職種・ポジション
+  area      String?         // 勤務地
+  salary    String?         // 想定年収
+  employment String?        // 雇用形態
+  feeRate   String?         // 手数料率
+  status    String   @default("募集中")  // 募集中/停止/クローズ
+  source    String?         // 取得元媒体（circus / jobins / manual）
+  sourceUrl String?         // 元求人票URL
+  detail    String?         // 求人詳細・条件
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  proposals JobProposal[]
+
+  @@index([status])
+}
+
+// 求人提案（顧客 × 求人）
+model JobProposal {
+  id         String    @id @default(cuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  jobId      String
+  job        Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  ca         String?
+  status     String    @default("提案")  // 提案/意思確認/応募/書類選考/面接/内定/承諾/辞退/見送り
+  proposedAt DateTime  @default(now())
+  decidedAt  DateTime?
+  note       String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([customerId])
+  @@index([jobId])
+  @@index([proposedAt])
 }
 
 model Task {

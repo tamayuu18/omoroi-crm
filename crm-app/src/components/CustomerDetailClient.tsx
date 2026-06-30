@@ -8,10 +8,11 @@ import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
   ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check, Download, Camera
 } from 'lucide-react'
-import type { Customer, Task, Meeting, History } from '@/types'
+import type { Customer, Task, Meeting, History, JobProposalWithJob } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, ASSIGNEE_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS } from '@/lib/constants'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
+import { ProposalSection } from '@/components/ProposalSection'
 import { cn } from '@/lib/utils'
 
 function fmt(d: Date | string | null | undefined) {
@@ -749,7 +750,8 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [history, setHistory] = useState<History[]>([])
-  const [tab, setTab] = useState<'all' | 'history' | 'tasks' | 'meetings'>('all')
+  const [proposals, setProposals] = useState<JobProposalWithJob[]>([])
+  const [tab, setTab] = useState<'all' | 'history' | 'tasks' | 'meetings' | 'proposals'>('all')
   const [loading, setLoading] = useState(true)
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
@@ -764,11 +766,12 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
     if (initial) setLoading(true)
     try {
       const nc = { cache: 'no-store' as const }
-      const [cRes, tRes, mRes, hRes] = await Promise.all([
+      const [cRes, tRes, mRes, hRes, pRes] = await Promise.all([
         fetch(`/api/customers/${customerId}`, nc),
         fetch(`/api/tasks?customerId=${customerId}`, nc),
         fetch(`/api/meetings?customerId=${customerId}`, nc),
         fetch(`/api/history/${customerId}`, nc),
+        fetch(`/api/proposals?customerId=${customerId}`, nc),
       ])
       if (cRes.ok) setCustomer(await cRes.json())
       if (tRes.ok) setTasks(await tRes.json())
@@ -777,6 +780,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
         const h = await hRes.json() as History[]
         setHistory(h.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()))
       }
+      if (pRes.ok) setProposals(await pRes.json())
     } finally { if (initial) setLoading(false) }
   }, [customerId])
 
@@ -995,6 +999,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
               { key: 'history', label: '活動履歴', count: history.length },
               { key: 'tasks', label: 'タスク', count: tasks.length },
               { key: 'meetings', label: '面談', count: meetings.length },
+              { key: 'proposals', label: '提案求人', count: proposals.length },
             ] as const).map(({ key, label, count }) => (
               <button key={key} onClick={() => setTab(key)}
                 className={cn('px-4 py-3 text-sm font-medium border-b-2 transition-colors',
@@ -1088,6 +1093,11 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
                   ))}
                 </div>
               )
+            )}
+
+            {/* 提案求人タブ */}
+            {tab === 'proposals' && (
+              <ProposalSection customerId={customerId} ca={customer.ca} proposals={proposals} onUpdate={fetchAll} />
             )}
           </div>
         </div>

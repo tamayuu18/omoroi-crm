@@ -4,11 +4,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { cn } from '@/lib/utils'
-import { Users, CheckSquare, LayoutDashboard, LogOut } from 'lucide-react'
+import { Users, CheckSquare, LayoutDashboard, Briefcase, BarChart3, LogOut } from 'lucide-react'
 
 const navItems = [
   { href: '/', label: '顧客一覧', icon: Users },
   { href: '/tasks', label: 'タスク', icon: CheckSquare },
+  { href: '/jobs', label: '求人', icon: Briefcase },
+  { href: '/kpi', label: 'KPI', icon: BarChart3 },
   { href: '/dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
 ]
 

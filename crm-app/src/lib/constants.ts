@@ -6,6 +6,21 @@ export const INFLOW_OPTIONS = ['Lreach', 'リファラル', 'その他']
 
 export const GENDER_OPTIONS = ['男性', '女性', 'その他']
 
+// 求人マスタの募集状況
+export const JOB_STATUS_OPTIONS = ['募集中', '停止', 'クローズ']
+
+// 求人提案のステータス（順序＝選考ファネル）
+export const PROPOSAL_STATUS_OPTIONS = [
+  '提案', '意思確認', '応募', '書類選考', '面接', '内定', '承諾', '辞退', '見送り',
+]
+
+// KPI集計で「選考到達」とみなす提案ステータス
+export const PROPOSAL_SELECTION_STATUSES = ['応募', '書類選考', '面接', '内定', '承諾']
+// KPI集計で「内定到達」とみなす提案ステータス
+export const PROPOSAL_OFFER_STATUSES = ['内定', '承諾']
+// KPI集計で「承諾」とみなす提案ステータス
+export const PROPOSAL_ACCEPTED_STATUSES = ['承諾']
+
 export const TIMING_OPTIONS = ['すぐにでも', '1ヶ月以内', '3ヶ月以内', '半年以内', '1年以内', '時期未定']
 
 export const PREF_OPTIONS = [
