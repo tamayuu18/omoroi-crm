@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, ExternalLink, Link2 } from 'lucide-react'
 import type { Job, JobProposalWithJob } from '@/types'
 import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
+import { JobFormModal } from '@/components/JobFormModal'
 import { cn } from '@/lib/utils'
 
 const statusColor = (s: string) =>
@@ -25,13 +26,26 @@ export function ProposalSection({
   const [adding, setAdding] = useState(false)
   const [selectedJob, setSelectedJob] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showJobForm, setShowJobForm] = useState(false)
 
-  useEffect(() => {
+  function loadJobs() {
     fetch('/api/jobs?status=募集中', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : []))
       .then(setJobs)
       .catch(() => {})
-  }, [])
+  }
+  useEffect(() => { loadJobs() }, [])
+
+  // 新規求人を登録して、その場でこの顧客への提案を作成する
+  async function createJobAndPropose(job: Job) {
+    await fetch('/api/proposals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerId, jobId: job.id, ca, status: '提案' }),
+    })
+    loadJobs()
+    onUpdate()
+  }
 
   async function addProposal() {
     if (!selectedJob) return
@@ -71,10 +85,14 @@ export function ProposalSection({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setShowJobForm(true)}
+          className="flex items-center gap-1.5 text-sm border border-[#0070D2] text-[#0070D2] px-3 py-1.5 rounded-lg hover:bg-blue-50">
+          <Link2 size={15} /> 新規求人を登録して提案
+        </button>
         <button onClick={() => setAdding(v => !v)}
           className="flex items-center gap-1.5 text-sm bg-[#0070D2] text-white px-3 py-1.5 rounded-lg hover:bg-[#005fb2]">
-          <Plus size={15} /> 求人を提案
+          <Plus size={15} /> 既存求人から提案
         </button>
       </div>
 
@@ -127,6 +145,14 @@ export function ProposalSection({
             </div>
           ))}
         </div>
+      )}
+
+      {showJobForm && (
+        <JobFormModal
+          title="新規求人を登録して提案"
+          onClose={() => setShowJobForm(false)}
+          onSaved={createJobAndPropose}
+        />
       )}
     </div>
   )
