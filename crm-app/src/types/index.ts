@@ -5,6 +5,8 @@ export type { Task, Meeting, Yomi }
 export type Customer = PrismaCustomer & {
   expectedRevenue?: string | null
   feeRate?: string | null
+  meetings?: Pick<Meeting, 'date'>[]
+  tasks?: Pick<Task, 'id'>[]
 }
 
 export type History = PrismaHistory & {
