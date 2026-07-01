@@ -37,7 +37,8 @@ export async function getCustomers(filters?: { status?: string; ca?: string; yom
     where,
     orderBy,
     include: {
-      meetings: { orderBy: { date: 'asc' }, take: 1, select: { date: true } },
+      meetings: { where: { status: { not: 'キャンセル' } }, orderBy: { date: 'asc' }, take: 1, select: { date: true } },
+      tasks: { where: { status: { not: '完了' } }, select: { id: true }, take: 1 },
     },
   })
 

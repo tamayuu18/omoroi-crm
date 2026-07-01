@@ -8,7 +8,7 @@ import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X,
 import type { Customer, CustomerStatus } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, INFLOW_OPTIONS, PREF_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS } from '@/lib/constants'
-import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
+import { StatusBadge, YomiRankBadge, TaskBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
 function formatDate(d: Date | string | null | undefined) {
@@ -461,6 +461,7 @@ function CustomerListInner() {
                 </th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('name')}>氏名<SortIcon col="name" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('status')}>ステータス<SortIcon col="status" /></th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">タスク</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">担当CA</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('registeredAt')}>送客日<SortIcon col="registeredAt" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('firstMeeting')}>初回面談日<SortIcon col="firstMeeting" /></th>
@@ -486,9 +487,10 @@ function CustomerListInner() {
                       {c.kana && <div className="text-xs text-gray-400">{c.kana}</div>}
                     </td>
                     <td className="px-4 py-3" onClick={() => { window.location.href = `/customers/${c.id}` }}><StatusBadge status={c.status} /></td>
+                    <td className="px-4 py-3" onClick={() => { window.location.href = `/customers/${c.id}` }}><TaskBadge hasOpenTask={(c.tasks?.length ?? 0) > 0} /></td>
                     <td className="px-4 py-3 text-gray-700" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.ca}</td>
                     <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{formatDate(c.registeredAt)}</td>
-                    <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{(c as any).meetings?.[0]?.date ? formatDate((c as any).meetings[0].date) : '—'}</td>
+                    <td className="px-4 py-3 text-gray-500" onClick={() => { window.location.href = `/customers/${c.id}` }}>{c.meetings?.[0]?.date ? formatDate(c.meetings[0].date) : '—'}</td>
                     <td className="px-4 py-3 text-gray-700 max-w-[220px]" onClick={() => { window.location.href = `/customers/${c.id}` }}>
                       <div className="flex items-center gap-2">
                         <span className="truncate">{c.nextAction}</span>
