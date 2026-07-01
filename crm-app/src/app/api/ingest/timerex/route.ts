@@ -74,40 +74,26 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      const meetingData = {
-        name: guestName,
-        ca: caName,
-        date: startDatetime,
-        startTime: startDatetime ? startDatetime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }) : null,
-        endTime: endDatetime ? endDatetime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }) : null,
-        method: body.online_meeting_provider && body.online_meeting_provider !== 'none' ? body.online_meeting_provider : '対面',
-        status: '予約済',
-      }
+      // 同じtimerexIdの面談が既にあればスキップ
+      const existingMeeting = await prisma.meeting.findFirst({
+        where: { customerId: customer.id, date: startDatetime ?? undefined },
+      })
 
-      // 同じ予約(timerexId)が既にあれば、リスケとして日時を更新する
-      const existingByTimerexId = timerexId
-        ? await prisma.meeting.findFirst({ where: { customerId: customer.id, timerexId } })
-        : null
-      // 同じtimerexIdが無い場合、同一日時の面談が既にあればスキップ（重複通知対策）
-      const existingByDate = !existingByTimerexId
-        ? await prisma.meeting.findFirst({ where: { customerId: customer.id, date: startDatetime ?? undefined } })
-        : null
-
-      let action = 'ignored'
-      if (existingByTimerexId) {
-        await prisma.meeting.update({
-          where: { id: existingByTimerexId.id },
-          data: meetingData,
-        })
-        action = 'rescheduled'
-      } else if (!existingByDate) {
+      if (!existingMeeting) {
         await prisma.meeting.create({
-          data: { id: generateId(), customerId: customer.id, timerexId: timerexId || null, ...meetingData },
+          data: {
+            id: generateId(),
+            customerId: customer.id,
+            name: guestName,
+            ca: caName,
+            date: startDatetime,
+            startTime: startDatetime ? startDatetime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }) : null,
+            endTime: endDatetime ? endDatetime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }) : null,
+            method: body.online_meeting_provider && body.online_meeting_provider !== 'none' ? body.online_meeting_provider : '対面',
+            status: '予約済',
+          },
         })
-        action = 'created'
-      }
 
-      if (action !== 'ignored') {
         // 顧客ステータスを面談予約済みに更新
         await prisma.customer.update({
           where: { id: customer.id },
@@ -115,7 +101,7 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      return NextResponse.json({ status: 'ok', action, customerId: customer.id })
+      return NextResponse.json({ status: 'ok', action: 'created', customerId: customer.id })
     } else if (status === 2 || status === 3) {
       // キャンセル: 対応する面談をキャンセルに更新
       let cancelCustomer = null
@@ -131,11 +117,9 @@ export async function POST(req: NextRequest) {
       }
       const customer = cancelCustomer
 
-      if (customer && (timerexId || startDatetime)) {
+      if (customer && startDatetime) {
         await prisma.meeting.updateMany({
-          where: timerexId
-            ? { customerId: customer.id, timerexId }
-            : { customerId: customer.id, date: startDatetime as Date },
+          where: { customerId: customer.id, date: startDatetime },
           data: { status: 'キャンセル' },
         })
       }
