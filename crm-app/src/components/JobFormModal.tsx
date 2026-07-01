@@ -50,18 +50,21 @@ export function JobFormModal({
   const [scraping, setScraping] = useState(false)
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showPaste, setShowPaste] = useState(false)
+  const [htmlPaste, setHtmlPaste] = useState('')
 
   const set = (k: keyof FormState, v: string) => setForm(p => ({ ...p, [k]: v }))
 
-  async function handleScrape() {
-    if (!url) return
+  // URL取得（html未指定）またはHTML貼り付け（html指定）で下書きを取得する
+  async function runScrape(html?: string) {
+    if (!url) { setMsg('先に求人票URLを入力してください'); return }
     setScraping(true)
     setMsg('')
     try {
       const res = await fetch('/api/jobs/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(html ? { url, html } : { url }),
       })
       if (!res.ok) throw new Error()
       const d = await res.json()
@@ -78,14 +81,19 @@ export function JobFormModal({
         sourceUrl: d.sourceUrl ?? url,
       }))
       const label = d.source === 'circus' ? 'サーカス' : d.source === 'jobins' ? 'ジョビンズ' : '対象外サイト'
-      const got = d.company || d.title
-      setMsg(
-        got
-          ? `${label}から取得しました。内容を確認・修正して保存してください。`
-          : `${label}：自動取得できませんでした。手入力してください。`
-      )
+      if (d.company || d.title) {
+        setMsg(`${label}から取得しました。内容を確認・修正して保存してください。`)
+        setShowPaste(false)
+      } else {
+        // 失敗理由を診断情報から表示し、HTML貼り付けを促す
+        const dbg = d._debug ?? {}
+        const reason = dbg.error ? `（${dbg.error}）` : dbg.status ? `（HTTP ${dbg.status}）` : ''
+        setMsg(`${label}：サーバーからの自動取得ができませんでした${reason}。下の「ページのHTMLを貼り付けて取込」をお試しください。`)
+        setShowPaste(true)
+      }
     } catch {
-      setMsg('取得に失敗しました。手入力してください。')
+      setMsg('取得に失敗しました。ページのHTMLを貼り付けて取込するか、手入力してください。')
+      setShowPaste(true)
     } finally {
       setScraping(false)
     }
@@ -134,17 +142,36 @@ export function JobFormModal({
 
         <div className="p-6 space-y-4">
           {/* URL取込 */}
-          <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3">
-            <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1">
+          <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3 space-y-2">
+            <label className="block text-xs font-medium text-gray-600 flex items-center gap-1">
               <Link2 size={13} /> 求人票URLから自動取得（サーカス / ジョビンズ）
             </label>
             <div className="flex gap-2">
               <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..." className={inp} />
-              <button onClick={handleScrape} disabled={scraping || !url}
+              <button onClick={() => runScrape()} disabled={scraping || !url}
                 className="shrink-0 flex items-center gap-1.5 bg-[#0070D2] text-white px-3 py-2 rounded-lg text-sm hover:bg-[#005fb2] disabled:opacity-50">
                 {scraping ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}取込
               </button>
             </div>
+
+            {/* HTML貼り付けフォールバック（サーバー取得できない媒体向け） */}
+            <button type="button" onClick={() => setShowPaste(v => !v)}
+              className="text-xs text-blue-600 hover:underline">
+              {showPaste ? '▼' : '▶'} 取り込めない場合：ページのHTMLを貼り付けて取込
+            </button>
+            {showPaste && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  求人ページをブラウザで開き、右クリック→「ページのソースを表示」→全選択(⌘A)→コピー(⌘C) して、下に貼り付けてください。
+                </p>
+                <textarea value={htmlPaste} onChange={e => setHtmlPaste(e.target.value)} rows={4}
+                  placeholder="<html> ... </html>" className={inp + ' font-mono text-[11px] resize-y'} />
+                <button onClick={() => runScrape(htmlPaste)} disabled={scraping || !url || !htmlPaste}
+                  className="flex items-center gap-1.5 bg-[#0070D2] text-white px-3 py-1.5 rounded-lg text-sm hover:bg-[#005fb2] disabled:opacity-50">
+                  {scraping ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}貼り付けたHTMLから取込
+                </button>
+              </div>
+            )}
           </div>
 
           {msg && <p className="text-xs text-red-600">{msg}</p>}

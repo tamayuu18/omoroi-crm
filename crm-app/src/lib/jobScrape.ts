@@ -11,6 +11,8 @@ export type JobDraft = {
   detail?: string
   source: 'circus' | 'jobins' | 'manual'
   sourceUrl: string
+  // 自動取得の診断情報（UIで失敗理由を表示するため）
+  _debug?: { fetched: boolean; status?: number; length?: number; extracted: boolean; error?: string }
 }
 
 const UA =
@@ -27,13 +29,19 @@ export function detectSource(url: string): JobDraft['source'] {
   return 'manual'
 }
 
-async function fetchHtml(url: string): Promise<string> {
+async function fetchHtml(url: string): Promise<{ html: string; status: number }> {
+  const origin = (() => { try { return new URL(url).origin } catch { return undefined } })()
   const res = await fetch(url, {
-    headers: { 'User-Agent': UA, Accept: 'text/html' },
+    headers: {
+      'User-Agent': UA,
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'ja,en;q=0.9',
+      ...(origin ? { Referer: origin } : {}),
+    },
     redirect: 'follow',
   })
-  if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
-  return res.text()
+  const html = await res.text()
+  return { html, status: res.status }
 }
 
 // ===== サーカス（Next.js __NEXT_DATA__ のJSONを解析）=====
@@ -159,15 +167,32 @@ function scrapeJobins(html: string, url: string): JobDraft {
   return draft
 }
 
-// URLから求人票を取得して下書きを返す。失敗時は source=manual で空の下書きを返す。
+// 与えられたHTMLから下書きを抽出する（サーバー取得できない場合に、ブラウザのHTMLを貼り付けて使う）。
+export function scrapeFromHtml(source: JobDraft['source'], html: string, url: string): JobDraft {
+  const draft = source === 'circus' ? scrapeCircus(html, url)
+    : source === 'jobins' ? scrapeJobins(html, url)
+    : { source, sourceUrl: url }
+  const extracted = !!(draft.company || draft.title)
+  draft._debug = { ...(draft._debug ?? { fetched: true, extracted }), fetched: true, extracted, length: html.length }
+  return draft
+}
+
+// URLから求人票を取得して下書きを返す。失敗時は source を保持した空の下書き＋診断情報を返す。
 export async function scrapeJob(url: string): Promise<JobDraft> {
   const source = detectSource(url)
-  if (source === 'manual') return { source: 'manual', sourceUrl: url }
+  if (source === 'manual') {
+    return { source: 'manual', sourceUrl: url, _debug: { fetched: false, extracted: false, error: '対象外サイト' } }
+  }
   try {
-    const html = await fetchHtml(url)
-    return source === 'circus' ? scrapeCircus(html, url) : scrapeJobins(html, url)
+    const { html, status } = await fetchHtml(url)
+    if (status >= 400) {
+      return { source, sourceUrl: url, _debug: { fetched: true, status, length: html.length, extracted: false, error: `HTTP ${status}` } }
+    }
+    const draft = scrapeFromHtml(source, html, url)
+    if (draft._debug) draft._debug.status = status
+    return draft
   } catch (e) {
     console.error('scrapeJob failed', e)
-    return { source, sourceUrl: url }
+    return { source, sourceUrl: url, _debug: { fetched: false, extracted: false, error: e instanceof Error ? e.message : 'fetch error' } }
   }
 }
