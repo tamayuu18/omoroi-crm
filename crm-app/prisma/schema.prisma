@@ -87,10 +87,12 @@ model Meeting {
   proposal     String?
   nextAction   String?
   nextDeadline DateTime?
+  timerexId    String?
   createdAt    DateTime  @default(now())
 
   @@index([customerId])
   @@index([date])
+  @@index([timerexId])
 }
 
 model History {

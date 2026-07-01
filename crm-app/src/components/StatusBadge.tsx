@@ -67,4 +67,13 @@ export function YomiRankBadge({ rank }: { rank: string | null | undefined }) {
   )
 }
 
+export function TaskBadge({ hasOpenTask }: { hasOpenTask: boolean }) {
+  if (!hasOpenTask) return null
+  return (
+    <span className="inline-block rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 whitespace-nowrap">
+      タスクあり
+    </span>
+  )
+}
+
 export { statusColors }
