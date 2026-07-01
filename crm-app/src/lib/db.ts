@@ -162,44 +162,50 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
   const start = new Date(y, (m ?? 1) - 1, 1)
   const end = new Date(y, m ?? 1, 1)
 
-  const [meetings, proposals] = await Promise.all([
-    prisma.meeting.findMany({
+  const emptyRow = (ca: string): KpiRow =>
+    ({ ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, offers: 0, accepted: 0 })
+
+  // 先に既定CAで行を初期化しておく（クエリが失敗しても必ずCA別カードが出るように）
+  const rows = new Map<string, KpiRow>()
+  for (const ca of CA_OPTIONS) rows.set(ca, emptyRow(ca))
+  const rowFor = (ca?: string | null) => {
+    const key = ca || '未割当'
+    let r = rows.get(key)
+    if (!r) { r = emptyRow(key); rows.set(key, r) }
+    return r
+  }
+
+  // 面談と提案は別々に取得し、片方が失敗（例: 提案テーブル未作成）しても集計を続行する
+  let meetings: { ca: string | null; status: string; result: string | null }[] = []
+  let proposals: { ca: string | null; status: string }[] = []
+  try {
+    meetings = await prisma.meeting.findMany({
       where: { date: { gte: start, lt: end }, status: { not: 'キャンセル' } },
       select: { ca: true, status: true, result: true },
-    }),
-    prisma.jobProposal.findMany({
+    })
+  } catch (e) {
+    console.error('getKpi: meeting query failed', e)
+  }
+  try {
+    proposals = await prisma.jobProposal.findMany({
       where: { proposedAt: { gte: start, lt: end } },
       select: { ca: true, status: true },
-    }),
-  ])
-
-  // CAごとに行を初期化（既定CA＋データ中の未知CAを網羅）
-  const cas = new Set<string>(CA_OPTIONS)
-  meetings.forEach(x => { if (x.ca) cas.add(x.ca) })
-  proposals.forEach(x => { if (x.ca) cas.add(x.ca) })
-
-  const rows = new Map<string, KpiRow>()
-  for (const ca of cas) {
-    rows.set(ca, { ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, offers: 0, accepted: 0 })
+    })
+  } catch (e) {
+    console.error('getKpi: proposal query failed (JobProposalテーブル未作成の可能性)', e)
   }
 
   const isHeld = (s?: string | null, r?: string | null) =>
     !!r || (!!s && ['実施', '実施済', '面談実施済み', '完了'].includes(s))
 
   for (const mtg of meetings) {
-    const row = rows.get(mtg.ca ?? '') ?? rows.get('未割当') ?? (() => {
-      const r: KpiRow = { ca: '未割当', meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, offers: 0, accepted: 0 }
-      rows.set('未割当', r); return r
-    })()
+    const row = rowFor(mtg.ca)
     row.meetingsSet++
     if (isHeld(mtg.status, mtg.result)) row.firstMeetings++
   }
 
   for (const p of proposals) {
-    const row = rows.get(p.ca ?? '') ?? rows.get('未割当') ?? (() => {
-      const r: KpiRow = { ca: '未割当', meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, offers: 0, accepted: 0 }
-      rows.set('未割当', r); return r
-    })()
+    const row = rowFor(p.ca)
     row.proposals++
     if (PROPOSAL_SELECTION_STATUSES.includes(p.status)) row.selections++
     if (PROPOSAL_OFFER_STATUSES.includes(p.status)) row.offers++
