@@ -73,21 +73,29 @@ export async function createCustomer(data: Omit<Customer, 'id' | 'registeredAt' 
   return prisma.customer.create({ data })
 }
 
+// 面談がまだ「実施済み」とみなせない顧客ステータス（これら以外は面談実施後のステータス）
+export const PRE_INTERVIEW_STATUSES = [
+  '新規送客', '初回未対応', '初回連絡済み', '不通', '面談予約済み', '面談キャンセル', 'リスケ調整中',
+]
+
+async function syncMeetingHeldStatus(customerId: string, status?: string | null) {
+  if (!status || PRE_INTERVIEW_STATUSES.includes(status)) return
+  const meeting = await prisma.meeting.findFirst({
+    where: { customerId, status: { notIn: ['キャンセル', '完了'] } },
+    orderBy: { date: 'desc' },
+  })
+  if (meeting) {
+    await prisma.meeting.update({ where: { id: meeting.id }, data: { status: '完了' } })
+  }
+}
+
 export async function updateCustomer(id: string, data: Partial<Customer>) {
   const customer = await prisma.customer.update({ where: { id }, data })
 
-  // ステータスを「面談実施済み」に変更した際、対応する直近の面談レコードにも
+  // ステータスが面談実施後の段階に変わった際、対応する直近の面談レコードにも
   // 実施結果を反映する。KPI集計(getKpi)はMeeting.statusを見て初回面談数を数えるため、
   // Customer.statusだけ更新してもMeetingが未更新のままだとKPIに反映されない。
-  if (data.status === '面談実施済み') {
-    const meeting = await prisma.meeting.findFirst({
-      where: { customerId: id, status: { notIn: ['キャンセル', '完了'] } },
-      orderBy: { date: 'desc' },
-    })
-    if (meeting) {
-      await prisma.meeting.update({ where: { id: meeting.id }, data: { status: '完了' } })
-    }
-  }
+  if (data.status) await syncMeetingHeldStatus(id, data.status)
 
   return customer
 }
@@ -192,12 +200,12 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
   }
 
   // 面談と提案は別々に取得し、片方が失敗（例: 提案テーブル未作成）しても集計を続行する
-  let meetings: { ca: string | null; status: string; result: string | null }[] = []
+  let meetings: { ca: string | null; status: string; result: string | null; customer: { status: string } | null }[] = []
   let proposals: { ca: string | null; status: string }[] = []
   try {
     meetings = await prisma.meeting.findMany({
       where: { date: { gte: start, lt: end }, status: { not: 'キャンセル' } },
-      select: { ca: true, status: true, result: true },
+      select: { ca: true, status: true, result: true, customer: { select: { status: true } } },
     })
   } catch (e) {
     console.error('getKpi: meeting query failed', e)
@@ -211,13 +219,18 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     console.error('getKpi: proposal query failed (JobProposalテーブル未作成の可能性)', e)
   }
 
-  const isHeld = (s?: string | null, r?: string | null) =>
-    !!r || (!!s && ['実施', '実施済', '面談実施済み', '完了'].includes(s))
+  // Meeting自体が「実施済み」を表すstatus/resultを持つか、または紐づく顧客が
+  // 面談実施後の段階まで進んでいれば「面談は実施済み」とみなす（顧客側だけステータスを
+  // 更新して面談レコードが未同期のケースの救済も兼ねる）
+  const isHeld = (s?: string | null, r?: string | null, customerStatus?: string | null) =>
+    !!r
+    || (!!s && ['実施', '実施済', '面談実施済み', '完了'].includes(s))
+    || (!!customerStatus && !PRE_INTERVIEW_STATUSES.includes(customerStatus))
 
   for (const mtg of meetings) {
     const row = rowFor(mtg.ca)
     row.meetingsSet++
-    if (isHeld(mtg.status, mtg.result)) row.firstMeetings++
+    if (isHeld(mtg.status, mtg.result, mtg.customer?.status)) row.firstMeetings++
   }
 
   for (const p of proposals) {
