@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, ExternalLink, Link2 } from 'lucide-react'
+import { Plus, Trash2, ExternalLink, Link2, Copy, Check } from 'lucide-react'
 import type { Job, JobProposalWithJob } from '@/types'
 import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
 import { JobFormModal } from '@/components/JobFormModal'
@@ -27,6 +27,50 @@ export function ProposalSection({
   const [selectedJob, setSelectedJob] = useState('')
   const [saving, setSaving] = useState(false)
   const [showJobForm, setShowJobForm] = useState(false)
+  // コピー用に選択中の提案ID（初期は全選択）
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [copied, setCopied] = useState(false)
+
+  // 提案の増減時のみ全選択に初期化（ステータス変更では選択を維持）
+  const proposalIds = proposals.map(p => p.id).join(',')
+  const [prevIds, setPrevIds] = useState(proposalIds)
+  if (proposalIds !== prevIds) {
+    setPrevIds(proposalIds)
+    setChecked(new Set(proposals.map(p => p.id)))
+  }
+
+  const toggleCheck = (id: string) =>
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const allChecked = proposals.length > 0 && checked.size === proposals.length
+  const toggleAll = () =>
+    setChecked(allChecked ? new Set() : new Set(proposals.map(p => p.id)))
+
+  // 選択した求人を「会社名／求人： URL」形式でクリップボードにコピー
+  async function copySelected() {
+    const text = proposals
+      .filter(p => checked.has(p.id))
+      .map(p => `${p.job.company}\n求人： ${p.job.sourceUrl ?? ''}`)
+      .join('\n\n')
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // クリップボードAPIが使えない環境向けフォールバック
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1800)
+  }
 
   function loadJobs() {
     fetch('/api/jobs?status=募集中', { cache: 'no-store' })
@@ -85,15 +129,30 @@ export function ProposalSection({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end gap-2">
-        <button onClick={() => setShowJobForm(true)}
-          className="flex items-center gap-1.5 text-sm border border-[#0070D2] text-[#0070D2] px-3 py-1.5 rounded-lg hover:bg-blue-50">
-          <Link2 size={15} /> 新規求人を登録して提案
-        </button>
-        <button onClick={() => setAdding(v => !v)}
-          className="flex items-center gap-1.5 text-sm bg-[#0070D2] text-white px-3 py-1.5 rounded-lg hover:bg-[#005fb2]">
-          <Plus size={15} /> 既存求人から提案
-        </button>
+      <div className="flex justify-between items-center gap-2 flex-wrap">
+        <div>
+          {proposals.length > 0 && (
+            <button onClick={copySelected} disabled={checked.size === 0}
+              className={cn(
+                'flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border disabled:opacity-40',
+                copied ? 'border-green-500 text-green-600 bg-green-50'
+                  : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+              )}>
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              {copied ? 'コピーしました' : `選択をコピー（${checked.size}件）`}
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setShowJobForm(true)}
+            className="flex items-center gap-1.5 text-sm border border-[#0070D2] text-[#0070D2] px-3 py-1.5 rounded-lg hover:bg-blue-50">
+            <Link2 size={15} /> 新規求人を登録して提案
+          </button>
+          <button onClick={() => setAdding(v => !v)}
+            className="flex items-center gap-1.5 text-sm bg-[#0070D2] text-white px-3 py-1.5 rounded-lg hover:bg-[#005fb2]">
+            <Plus size={15} /> 既存求人から提案
+          </button>
+        </div>
       </div>
 
       {adding && (
@@ -117,9 +176,15 @@ export function ProposalSection({
         <div className="text-center text-gray-400 text-sm py-8">提案した求人がありません</div>
       ) : (
         <div className="space-y-2">
+          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none px-1">
+            <input type="checkbox" checked={allChecked} onChange={toggleAll} className="cursor-pointer" />
+            すべて選択（コピー対象）
+          </label>
           {proposals.map(p => (
-            <div key={p.id} className="border border-gray-100 rounded-lg p-3">
+            <div key={p.id} className={cn('border rounded-lg p-3', checked.has(p.id) ? 'border-blue-200 bg-blue-50/30' : 'border-gray-100')}>
               <div className="flex items-start gap-2">
+                <input type="checkbox" checked={checked.has(p.id)} onChange={() => toggleCheck(p.id)}
+                  className="mt-1 shrink-0 cursor-pointer" />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-gray-900 text-sm">{p.job.title}</div>
                   <div className="text-xs text-gray-500">{p.job.company}</div>
