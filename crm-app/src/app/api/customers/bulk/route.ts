@@ -21,6 +21,17 @@ export async function POST(request: NextRequest) {
 
     if (action === 'updateStatus' && status) {
       await prisma.customer.updateMany({ where: { id: { in: ids } }, data: { status } })
+      if (status === '面談実施済み') {
+        for (const id of ids) {
+          const meeting = await prisma.meeting.findFirst({
+            where: { customerId: id, status: { notIn: ['キャンセル', '完了'] } },
+            orderBy: { date: 'desc' },
+          })
+          if (meeting) {
+            await prisma.meeting.update({ where: { id: meeting.id }, data: { status: '完了' } })
+          }
+        }
+      }
       return Response.json({ ok: true, updated: ids.length })
     }
 
