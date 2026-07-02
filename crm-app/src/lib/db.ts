@@ -74,7 +74,22 @@ export async function createCustomer(data: Omit<Customer, 'id' | 'registeredAt' 
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>) {
-  return prisma.customer.update({ where: { id }, data })
+  const customer = await prisma.customer.update({ where: { id }, data })
+
+  // ステータスを「面談実施済み」に変更した際、対応する直近の面談レコードにも
+  // 実施結果を反映する。KPI集計(getKpi)はMeeting.statusを見て初回面談数を数えるため、
+  // Customer.statusだけ更新してもMeetingが未更新のままだとKPIに反映されない。
+  if (data.status === '面談実施済み') {
+    const meeting = await prisma.meeting.findFirst({
+      where: { customerId: id, status: { notIn: ['キャンセル', '完了'] } },
+      orderBy: { date: 'desc' },
+    })
+    if (meeting) {
+      await prisma.meeting.update({ where: { id: meeting.id }, data: { status: '完了' } })
+    }
+  }
+
+  return customer
 }
 
 export async function getTasks(filters?: { customerId?: string; ca?: string }) {
