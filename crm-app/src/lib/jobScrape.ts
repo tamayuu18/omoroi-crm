@@ -12,7 +12,8 @@ export type JobDraft = {
   source: 'circus' | 'jobins' | 'manual'
   sourceUrl: string
   // 自動取得の診断情報（UIで失敗理由を表示するため）
-  _debug?: { fetched: boolean; status?: number; length?: number; extracted: boolean; error?: string }
+  // snippet: サーバーが実際に受け取ったHTMLの先頭抜粋（bot対策の遮断ページか本物かの判別用）
+  _debug?: { fetched: boolean; status?: number; length?: number; extracted: boolean; error?: string; snippet?: string }
 }
 
 const UA =
@@ -31,25 +32,32 @@ export function detectSource(url: string): JobDraft['source'] {
 
 async function fetchHtml(url: string): Promise<{ html: string; status: number }> {
   const origin = (() => { try { return new URL(url).origin } catch { return undefined } })()
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': UA,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      ...(origin ? { Referer: origin } : {}),
-    },
-    redirect: 'follow',
-  })
-  const html = await res.text()
-  return { html, status: res.status }
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 12000)
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': UA,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        ...(origin ? { Referer: origin } : {}),
+      },
+      redirect: 'follow',
+      signal: ctrl.signal,
+    })
+    const html = await res.text()
+    return { html, status: res.status }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 // ===== サーカス（Next.js __NEXT_DATA__ のJSONを解析）=====
@@ -121,111 +129,9 @@ function scrapeCircus(html: string, url: string): JobDraft {
   return draft
 }
 
-// ===== ジョビンズ（公開APIのJSONを優先。/public/job-detail/<uuid> のUUIDでAPIを叩く）=====
-// ジョビンズは Vue の SPA で、画面の中身は api.jobins.jp から取得している。
-// 求人ページのHTMLを直接サーバー取得すると bot 対策で中身が返らないことがあるため、
-// フロントと同じ公開APIを叩いて JSON から下書きを作る。
-function extractJobinsId(url: string): string | undefined {
-  // 例: https://jobins.jp/public/job-detail/111cdde0-1615-11f1-9024-068c8962773d
-  const m = url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
-  return m ? m[1] : undefined
-}
-
-// JSON を再帰的に走査し、候補キーに一致する最初の非空文字列を返す
-function deepFindString(obj: unknown, keys: string[], seen = new Set<object>()): string | undefined {
-  if (obj == null || typeof obj !== 'object' || seen.has(obj)) return undefined
-  seen.add(obj)
-  const lowered = keys.map(k => k.toLowerCase())
-  for (const [k, v] of Object.entries(obj)) {
-    if (lowered.includes(k.toLowerCase())) {
-      if (typeof v === 'string' && v.trim()) return v.trim()
-      if (typeof v === 'number') return String(v)
-    }
-  }
-  for (const v of Object.values(obj)) {
-    if (v && typeof v === 'object') {
-      const found = deepFindString(v, keys, seen)
-      if (found) return found
-    }
-  }
-  return undefined
-}
-
-// APIレスポンスの job オブジェクトを探す（{data:{...}} / {job:{...}} / 直下 いずれにも対応）
-function pickJobObject(json: unknown): unknown {
-  if (!json || typeof json !== 'object') return json
-  const rec = json as Record<string, unknown>
-  for (const key of ['data', 'job', 'result', 'jobDetail', 'job_detail']) {
-    if (rec[key] && typeof rec[key] === 'object') return rec[key]
-  }
-  return json
-}
-
-function scrapeJobinsJson(json: unknown, url: string): JobDraft {
-  const draft: JobDraft = { source: 'jobins', sourceUrl: url }
-  const job = pickJobObject(json)
-
-  draft.company =
-    deepFindString(job, ['company_name', 'companyName', 'corporation_name', 'client_name', 'company', 'employer_name'])
-  draft.title =
-    deepFindString(job, ['job_title', 'jobTitle', 'position_name', 'position', 'occupation_name', 'title', 'name'])
-  draft.salary =
-    deepFindString(job, ['annual_income', 'annualIncome', 'expected_salary', 'salary_range', 'salary', 'income', 'annual_salary'])
-  draft.area =
-    deepFindString(job, ['work_location', 'workplace', 'work_place', 'location', 'prefecture_name', 'prefecture', 'area', 'address'])
-  draft.employment =
-    deepFindString(job, ['employment_type', 'employmentType', 'contract_type', 'employment', 'employment_status'])
-
-  const detailParts = [
-    deepFindString(job, ['job_description', 'jobDescription', 'business_content', 'job_content', 'description', 'detail']) && `【仕事内容】\n${deepFindString(job, ['job_description', 'jobDescription', 'business_content', 'job_content', 'description', 'detail'])}`,
-    deepFindString(job, ['application_requirement', 'requirement', 'required_condition', 'qualification', 'must_condition']) && `【応募条件】\n${deepFindString(job, ['application_requirement', 'requirement', 'required_condition', 'qualification', 'must_condition'])}`,
-    deepFindString(job, ['welcome_condition', 'preferred_condition', 'welcome_requirement', 'want_condition']) && `【歓迎条件】\n${deepFindString(job, ['welcome_condition', 'preferred_condition', 'welcome_requirement', 'want_condition'])}`,
-    deepFindString(job, ['selection_flow', 'selection_process', 'interview_flow', 'process']) && `【選考フロー】\n${deepFindString(job, ['selection_flow', 'selection_process', 'interview_flow', 'process'])}`,
-    deepFindString(job, ['salary_detail', 'salaryDetail', 'income_detail', 'treatment']) && `【給与・待遇】\n${deepFindString(job, ['salary_detail', 'salaryDetail', 'income_detail', 'treatment'])}`,
-  ].filter(Boolean)
-  if (detailParts.length) draft.detail = detailParts.join('\n\n')
-
-  return draft
-}
-
-// ジョビンズの公開APIから求人JSONを取得（複数の想定エンドポイントを順に試す）
-async function fetchJobinsApi(uuid: string, url: string): Promise<JobDraft | undefined> {
-  const candidates = [
-    `https://api.jobins.jp/public/job-detail/${uuid}`,
-    `https://api.jobins.jp/api/public/job-detail/${uuid}`,
-    `https://api.jobins.jp/public/job/${uuid}`,
-    `https://api.jobins.jp/v1/public/job-detail/${uuid}`,
-  ]
-  for (const api of candidates) {
-    try {
-      const res = await fetch(api, {
-        headers: {
-          'User-Agent': UA,
-          Accept: 'application/json, text/plain, */*',
-          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-          Origin: 'https://jobins.jp',
-          Referer: 'https://jobins.jp/',
-        },
-        redirect: 'follow',
-      })
-      if (!res.ok) continue
-      const ct = res.headers.get('content-type') ?? ''
-      if (!ct.includes('json')) continue
-      const json = await res.json().catch(() => undefined)
-      if (!json) continue
-      const draft = scrapeJobinsJson(json, url)
-      if (draft.company || draft.title) {
-        draft._debug = { fetched: true, status: res.status, extracted: true }
-        return draft
-      }
-    } catch {
-      /* 次の候補へ */
-    }
-  }
-  return undefined
-}
-
-// ===== ジョビンズ（SSRされたHTMLをラベル走査で解析。API取得できない場合のフォールバック）=====
+// ===== ジョビンズ（SSRされたHTMLをラベル走査で解析）=====
+// ジョビンズの公開求人ページは、求人内容がHTML本体にSSRで埋め込まれている（別途のデータAPIは無い）。
+// そのためHTMLを取得してラベル走査で抽出する。
 function scrapeJobins(html: string, url: string): JobDraft {
   const draft: JobDraft = { source: 'jobins', sourceUrl: url }
   const root = parse(html)
@@ -285,8 +191,22 @@ export function scrapeFromHtml(source: JobDraft['source'], html: string, url: st
     : source === 'jobins' ? scrapeJobins(html, url)
     : { source, sourceUrl: url }
   const extracted = !!(draft.company || draft.title)
-  draft._debug = { ...(draft._debug ?? { fetched: true, extracted }), fetched: true, extracted, length: html.length }
+  // 抽出できなかった場合は、サーバーが受け取ったHTMLの先頭抜粋を診断用に添える
+  // （bot対策の遮断ページ／ログイン画面なのか、本物のページなのかを判別するため）
+  const snippet = extracted ? undefined : plainSnippet(html)
+  draft._debug = { ...(draft._debug ?? { fetched: true, extracted }), fetched: true, extracted, length: html.length, snippet }
   return draft
+}
+
+// HTMLからタグを大まかに除いた先頭テキスト抜粋（診断表示用）
+function plainSnippet(html: string, max = 220): string {
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.slice(0, max)
 }
 
 // URLから求人票を取得して下書きを返す。失敗時は source を保持した空の下書き＋診断情報を返す。
@@ -295,26 +215,17 @@ export async function scrapeJob(url: string): Promise<JobDraft> {
   if (source === 'manual') {
     return { source: 'manual', sourceUrl: url, _debug: { fetched: false, extracted: false, error: '対象外サイト' } }
   }
-
-  // ジョビンズはHTML直取得がbot対策で失敗しやすいため、まず公開APIをUUIDで試す
-  if (source === 'jobins') {
-    const uuid = extractJobinsId(url)
-    if (uuid) {
-      const apiDraft = await fetchJobinsApi(uuid, url).catch(() => undefined)
-      if (apiDraft) return apiDraft
-    }
-  }
-
   try {
     const { html, status } = await fetchHtml(url)
     if (status >= 400) {
-      return { source, sourceUrl: url, _debug: { fetched: true, status, length: html.length, extracted: false, error: `HTTP ${status}` } }
+      return { source, sourceUrl: url, _debug: { fetched: true, status, length: html.length, extracted: false, error: `HTTP ${status}`, snippet: plainSnippet(html) } }
     }
     const draft = scrapeFromHtml(source, html, url)
     if (draft._debug) draft._debug.status = status
     return draft
   } catch (e) {
     console.error('scrapeJob failed', e)
-    return { source, sourceUrl: url, _debug: { fetched: false, extracted: false, error: e instanceof Error ? e.message : 'fetch error' } }
+    const msg = e instanceof Error ? (e.name === 'AbortError' ? 'タイムアウト（12秒）' : e.message) : 'fetch error'
+    return { source, sourceUrl: url, _debug: { fetched: false, extracted: false, error: msg } }
   }
 }

@@ -87,7 +87,12 @@ export function JobFormModal({
       } else {
         // 失敗理由を診断情報から表示し、HTML貼り付けを促す
         const dbg = d._debug ?? {}
-        const reason = dbg.error ? `（${dbg.error}）` : dbg.status ? `（HTTP ${dbg.status}）` : ''
+        const parts = [
+          dbg.error ? `理由: ${dbg.error}` : dbg.status ? `HTTP ${dbg.status}` : null,
+          typeof dbg.length === 'number' ? `取得サイズ: ${dbg.length}文字` : null,
+          dbg.snippet ? `受信内容: ${dbg.snippet}` : null,
+        ].filter(Boolean)
+        const reason = parts.length ? `（${parts.join(' / ')}）` : ''
         setMsg(`${label}：サーバーからの自動取得ができませんでした${reason}。下の「ページのHTMLを貼り付けて取込」をお試しください。`)
         setShowPaste(true)
       }
