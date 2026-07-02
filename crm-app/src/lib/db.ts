@@ -201,7 +201,7 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
 
   // 面談と提案は別々に取得し、片方が失敗（例: 提案テーブル未作成）しても集計を続行する
   let meetings: { ca: string | null; status: string; result: string | null; customer: { status: string } | null }[] = []
-  let proposals: { ca: string | null; status: string }[] = []
+  let proposals: { ca: string | null; status: string; customerId: string }[] = []
   try {
     meetings = await prisma.meeting.findMany({
       where: { date: { gte: start, lt: end }, status: { not: 'キャンセル' } },
@@ -213,7 +213,7 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
   try {
     proposals = await prisma.jobProposal.findMany({
       where: { proposedAt: { gte: start, lt: end } },
-      select: { ca: true, status: true },
+      select: { ca: true, status: true, customerId: true },
     })
   } catch (e) {
     console.error('getKpi: proposal query failed (JobProposalテーブル未作成の可能性)', e)
@@ -233,9 +233,18 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     if (isHeld(mtg.status, mtg.result, mtg.customer?.status)) row.firstMeetings++
   }
 
+  // 求人提案数は提案(JobProposal)の件数ではなく、求人提案に進んだ求職者の人数で数える
+  // （同じ求職者に複数求人を提案しても1人としてカウントする）
+  const proposedCustomersByCa = new Map<string, Set<string>>()
   for (const p of proposals) {
     const row = rowFor(p.ca)
-    row.proposals++
+    const key = p.ca || '未割当'
+    let seen = proposedCustomersByCa.get(key)
+    if (!seen) { seen = new Set(); proposedCustomersByCa.set(key, seen) }
+    if (!seen.has(p.customerId)) {
+      seen.add(p.customerId)
+      row.proposals++
+    }
     if (PROPOSAL_SELECTION_STATUSES.includes(p.status)) row.selections++
     if (PROPOSAL_OFFER_STATUSES.includes(p.status)) row.offers++
     if (PROPOSAL_ACCEPTED_STATUSES.includes(p.status)) row.accepted++
