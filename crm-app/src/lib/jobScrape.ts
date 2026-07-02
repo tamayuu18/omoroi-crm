@@ -360,6 +360,96 @@ function scrapeJobins(html: string, url: string): JobDraft {
   return domDraft
 }
 
+// ===== ジョビンズ 公開API（URLだけで取込できる本命ルート）=====
+// エンドポイント: https://api.jobins.jp/api/public/jobins-shared-job/view/<uuid>
+// 認証不要のJSON。UUIDは公開求人ページURLの末尾から取得する。
+function extractJobinsId(url: string): string | undefined {
+  const m = url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
+  return m ? m[1] : undefined
+}
+
+const asObj = (v: unknown): Record<string, unknown> | undefined =>
+  v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined
+const asStr = (v: unknown): string | undefined => {
+  if (typeof v === 'string' && v.trim()) return v.trim()
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  return undefined
+}
+
+// APIの data オブジェクトから求人下書きを組み立てる（レスポンス構造は実データで確認済み）
+function scrapeJobinsApiData(data: unknown, url: string): JobDraft {
+  const draft: JobDraft = { source: 'jobins', sourceUrl: url }
+  const d = asObj(data)
+  if (!d) return draft
+  const details = asObj(d.details)
+  const overview = asObj(details?.overview)
+
+  draft.company = asStr(d.company_name) ?? asStr(details?.organization_name)
+  draft.title = asStr(d.title)
+
+  // 想定年収（万円単位）
+  const ann = asObj(details?.annual_salary) ?? asObj(asObj(overview?.salary)?.annual_income)
+  const min = asStr(ann?.min_year_salary)
+  const max = asStr(ann?.max_year_salary)
+  if (min || max) draft.salary = `${min ?? ''}万円〜${max ?? ''}万円`
+
+  // 雇用形態
+  draft.employment = asStr(details?.employment_status) ?? asStr(asObj(overview?.employment_type)?.employment_type)
+
+  // 勤務地（都道府県 + 詳細住所）
+  const prefs = Array.isArray(details?.work_location)
+    ? (details!.work_location as unknown[]).map(x => asStr(asObj(x)?.name)).filter(Boolean)
+    : []
+  const locDetail = asStr(asObj(overview?.work_location)?.work_location_detail)
+  const areaParts = [prefs.join('・') || undefined, locDetail].filter(Boolean)
+  if (areaParts.length) draft.area = areaParts.join('\n')
+
+  // 詳細（各項目を見出し付きで結合）
+  const appReq = asObj(details?.application_requirements)
+  const salary = asObj(overview?.salary)
+  const emp = asObj(overview?.employment_type)
+  const welfare = asObj(overview?.benefits_and_welfare)
+  const holiday = asObj(overview?.holiday)
+  const detailParts = [
+    f(asStr(overview?.reason_for_recruitment), '募集背景'),
+    f(asStr(overview?.job_description), '仕事内容'),
+    f(asStr(appReq?.application_requirement_detail), '応募条件（必須）'),
+    f(asStr(appReq?.welcome_condition), '歓迎条件'),
+    f(asStr(details?.selection_flow) ?? asStr(overview?.selection_flow), '選考フロー'),
+    f(asStr(salary?.salary_detials) ?? asStr(salary?.salary_details), '給与詳細'),
+    f(asStr(emp?.working_hours), '勤務時間'),
+    f(asStr(holiday?.holiday_details), '休日・休暇'),
+    f(asStr(welfare?.welfare_benefits_detail), '福利厚生'),
+  ].filter(Boolean)
+  if (detailParts.length) draft.detail = detailParts.join('\n\n')
+
+  return draft
+}
+
+// 公開APIから求人JSONを取得（認証不要）。失敗時は undefined。
+async function fetchJobinsApi(uuid: string): Promise<unknown | undefined> {
+  const api = `https://api.jobins.jp/api/public/jobins-shared-job/view/${uuid}`
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 12000)
+  try {
+    const res = await fetch(api, {
+      headers: {
+        'User-Agent': UA,
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        Origin: 'https://jobins.jp',
+        Referer: 'https://jobins.jp/',
+      },
+      redirect: 'follow',
+      signal: ctrl.signal,
+    })
+    if (!res.ok) return undefined
+    return await res.json().catch(() => undefined)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // 与えられたHTMLから下書きを抽出する（サーバー取得できない場合に、ブラウザのHTMLを貼り付けて使う）。
 export function scrapeFromHtml(source: JobDraft['source'], html: string, url: string): JobDraft {
   const draft = source === 'circus' ? scrapeCircus(html, url)
@@ -390,6 +480,28 @@ export async function scrapeJob(url: string): Promise<JobDraft> {
   if (source === 'manual') {
     return { source: 'manual', sourceUrl: url, _debug: { fetched: false, extracted: false, error: '対象外サイト' } }
   }
+
+  // ジョビンズは公開API（認証不要JSON）から直接取得する
+  if (source === 'jobins') {
+    const uuid = extractJobinsId(url)
+    if (uuid) {
+      try {
+        const json = await fetchJobinsApi(uuid)
+        const data = asObj(json)?.data
+        if (data) {
+          const draft = scrapeJobinsApiData(data, url)
+          if (draft.company || draft.title) {
+            draft._debug = { fetched: true, extracted: true, status: 200 }
+            return draft
+          }
+        }
+      } catch (e) {
+        console.error('jobins api failed', e)
+        // APIで取れない場合はHTML取得へフォールバック
+      }
+    }
+  }
+
   try {
     const { html, status } = await fetchHtml(url)
     if (status >= 400) {
