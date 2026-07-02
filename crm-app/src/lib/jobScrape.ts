@@ -142,8 +142,23 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#0?39;/g, "'")
+    .replace(/&nbsp;|&#160;/g, ' ')
     .replace(/&#0?38;/g, '&')
     .replace(/&amp;/g, '&')
+}
+
+// HTML片からタグを除いてテキスト化（求人詳細のdescription整形用）
+function stripTags(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<\s*br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '・')
+      .replace(/<[^>]+>/g, '')
+  )
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
 }
 
 // data-page 属性のJSONを取り出してパースする
@@ -175,17 +190,6 @@ function deepFindString(obj: unknown, keys: string[], seen = new Set<object>()):
     }
   }
   return undefined
-}
-
-// 診断用：JSON内に現れるキー名を収集（構造把握のため。深さ制限あり）
-function collectKeys(obj: unknown, depth = 3, acc = new Set<string>(), seen = new Set<object>()): Set<string> {
-  if (depth < 0 || obj == null || typeof obj !== 'object' || seen.has(obj)) return acc
-  seen.add(obj)
-  for (const [k, v] of Object.entries(obj)) {
-    acc.add(k)
-    if (v && typeof v === 'object') collectKeys(v, depth - 1, acc, seen)
-  }
-  return acc
 }
 
 const f = (v: string | undefined, label: string) => (v ? `【${label}】\n${v}` : undefined)
@@ -260,24 +264,100 @@ function scrapeJobinsDom(html: string, url: string): JobDraft {
   return draft
 }
 
+// ===== JSON-LD(schema.org JobPosting) 解析 =====
+// 求人ページはSEO用に <script type="application/ld+json"> の JobPosting を持つことが多い。
+// これは生HTMLに含まれるため、サーバー取得でも読める。
+function extractJsonLd(html: string): unknown[] {
+  const blocks: unknown[] = []
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html))) {
+    try { blocks.push(JSON.parse(m[1].trim())) } catch { /* 壊れたJSONは無視 */ }
+  }
+  return blocks
+}
+
+function findJobPosting(blocks: unknown[]): Record<string, unknown> | undefined {
+  const isJP = (o: unknown): o is Record<string, unknown> => {
+    if (!o || typeof o !== 'object') return false
+    const t = (o as Record<string, unknown>)['@type']
+    return t === 'JobPosting' || (Array.isArray(t) && t.includes('JobPosting'))
+  }
+  for (const b of blocks) {
+    if (isJP(b)) return b
+    if (b && typeof b === 'object') {
+      const graph = (b as Record<string, unknown>)['@graph']
+      if (Array.isArray(graph)) {
+        const jp = graph.find(isJP)
+        if (jp) return jp as Record<string, unknown>
+      }
+    }
+  }
+  return undefined
+}
+
+function scrapeJobinsJsonLd(jp: Record<string, unknown>, url: string): JobDraft {
+  const draft: JobDraft = { source: 'jobins', sourceUrl: url }
+  const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+
+  draft.title = s(jp.title) ?? deepFindString(jp, ['title', 'name'])
+  draft.company = deepFindString(jp.hiringOrganization, ['name', 'legalName'])
+  draft.area = deepFindString(jp.jobLocation, ['addressRegion', 'addressLocality', 'streetAddress'])
+
+  const emp = jp.employmentType
+  draft.employment = typeof emp === 'string' ? emp
+    : Array.isArray(emp) ? emp.filter(x => typeof x === 'string').join('・') || undefined
+    : undefined
+
+  const min = deepFindString(jp.baseSalary, ['minValue'])
+  const max = deepFindString(jp.baseSalary, ['maxValue'])
+  const val = deepFindString(jp.baseSalary, ['value'])
+  draft.salary = (min || max) ? `${min ?? ''}〜${max ?? ''}` : val
+
+  const desc = s(jp.description)
+  if (desc) draft.detail = stripTags(desc)
+
+  return draft
+}
+
+// 診断用：HTML内にどのデータ形式が含まれるかを一覧化（原因特定を1往復で行うため）
+function jobinsDiagnostic(html: string): string {
+  const has = (re: RegExp) => (re.test(html) ? 'Y' : 'N')
+  const count = (re: RegExp) => (html.match(re) || []).length
+  return [
+    `len=${html.length}`,
+    `ld+json=${count(/application\/ld\+json/gi)}`,
+    `JobPosting=${has(/JobPosting/)}`,
+    `data-page=${has(/data-page=/)}`,
+    `__NUXT__=${has(/__NUXT__/)}`,
+    `__NEXT_DATA__=${has(/__NEXT_DATA__/)}`,
+    `window.__=${has(/window\.__[A-Za-z]/)}`,
+    `nav=${has(/<nav/i)}`,
+    `h2=${count(/<h2/gi)}`,
+    `jb-font-medium=${has(/jb-font-medium/)}`,
+  ].join(' ')
+}
+
 function scrapeJobins(html: string, url: string): JobDraft {
-  // 1) 埋め込みJSON（Inertia data-page）を優先
+  // 1) JSON-LD(JobPosting) 構造化データ
+  const jp = findJobPosting(extractJsonLd(html))
+  if (jp) {
+    const draft = scrapeJobinsJsonLd(jp, url)
+    if (draft.company || draft.title) return draft
+  }
+  // 2) 埋め込みJSON（Inertia data-page）
   const page = extractInertiaPage(html)
   if (page) {
     const draft = scrapeJobinsJson(page, url)
     if (draft.company || draft.title) return draft
-    // JSONはあるが項目が取れない → 構造を診断に残してDOMへ
-    const props = (page && typeof page === 'object' && 'props' in page)
-      ? (page as { props: unknown }).props : page
-    const keys = [...collectKeys(props)].slice(0, 60).join(', ')
-    const domDraft = scrapeJobinsDom(html, url)
-    if (!domDraft.company && !domDraft.title) {
-      domDraft._debug = { fetched: true, extracted: false, snippet: `data-page検出/項目未一致。keys: ${keys}` }
-    }
-    return domDraft
   }
-  // 2) DOM走査（描画済みHTML向け）
-  return scrapeJobinsDom(html, url)
+  // 3) DOM走査（描画済みHTML向け）
+  const domDraft = scrapeJobinsDom(html, url)
+  if (domDraft.company || domDraft.title) return domDraft
+
+  // すべて失敗 → HTMLの構造診断を残す（次の手がかり）
+  domDraft._debug = { fetched: true, extracted: false, snippet: `診断 ${jobinsDiagnostic(html)}` }
+  return domDraft
 }
 
 // 与えられたHTMLから下書きを抽出する（サーバー取得できない場合に、ブラウザのHTMLを貼り付けて使う）。
@@ -286,9 +366,9 @@ export function scrapeFromHtml(source: JobDraft['source'], html: string, url: st
     : source === 'jobins' ? scrapeJobins(html, url)
     : { source, sourceUrl: url }
   const extracted = !!(draft.company || draft.title)
-  // 抽出できなかった場合は、サーバーが受け取ったHTMLの先頭抜粋を診断用に添える
+  // 抽出できなかった場合は、スクレイパが残した診断（無ければHTML先頭抜粋）を添える
   // （bot対策の遮断ページ／ログイン画面なのか、本物のページなのかを判別するため）
-  const snippet = extracted ? undefined : plainSnippet(html)
+  const snippet = extracted ? undefined : (draft._debug?.snippet ?? plainSnippet(html))
   draft._debug = { ...(draft._debug ?? { fetched: true, extracted }), fetched: true, extracted, length: html.length, snippet }
   return draft
 }
