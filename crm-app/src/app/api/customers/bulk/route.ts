@@ -2,6 +2,7 @@ import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { PRE_INTERVIEW_STATUSES } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     if (action === 'updateStatus' && status) {
       await prisma.customer.updateMany({ where: { id: { in: ids } }, data: { status } })
-      if (status === '面談実施済み') {
+      if (!PRE_INTERVIEW_STATUSES.includes(status)) {
         for (const id of ids) {
           const meeting = await prisma.meeting.findFirst({
             where: { customerId: id, status: { notIn: ['キャンセル', '完了'] } },
