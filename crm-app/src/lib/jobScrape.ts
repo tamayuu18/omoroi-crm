@@ -129,22 +129,103 @@ function scrapeCircus(html: string, url: string): JobDraft {
   return draft
 }
 
-// ===== ジョビンズ（SSRされたHTMLをラベル走査で解析）=====
-// ジョビンズの公開求人ページは、求人内容がHTML本体にSSRで埋め込まれている（別途のデータAPIは無い）。
-// そのためHTMLを取得してラベル走査で抽出する。
-function scrapeJobins(html: string, url: string): JobDraft {
+// ===== ジョビンズ =====
+// ジョビンズは Laravel + Vue(Inertia.js) 構成。求人データはDOMではなく、
+// HTML内の <div id="app" data-page="{...JSON...}"> に埋め込まれている。
+// このJSONはサーバー取得の生HTML（JS未描画）にも含まれるため、まずこれを読む。
+// 取れない場合のみ、描画済みDOM（貼り付けHTML等）向けのラベル走査にフォールバックする。
+
+// HTML属性内のエンティティを復元（Inertiaは htmlspecialchars(ENT_QUOTES) 相当でエンコード）
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&#0?38;/g, '&')
+    .replace(/&amp;/g, '&')
+}
+
+// data-page 属性のJSONを取り出してパースする
+function extractInertiaPage(html: string): unknown | undefined {
+  const m = html.match(/data-page="([^"]*)"/)
+  if (!m) return undefined
+  try {
+    return JSON.parse(decodeHtmlEntities(m[1]))
+  } catch {
+    return undefined
+  }
+}
+
+// JSONを再帰走査し、候補キー（大小無視）に一致する最初の非空文字列/数値を返す
+function deepFindString(obj: unknown, keys: string[], seen = new Set<object>()): string | undefined {
+  if (obj == null || typeof obj !== 'object' || seen.has(obj)) return undefined
+  seen.add(obj)
+  const lowered = keys.map(k => k.toLowerCase())
+  for (const [k, v] of Object.entries(obj)) {
+    if (lowered.includes(k.toLowerCase())) {
+      if (typeof v === 'string' && v.trim()) return v.trim()
+      if (typeof v === 'number') return String(v)
+    }
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') {
+      const found = deepFindString(v, keys, seen)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
+// 診断用：JSON内に現れるキー名を収集（構造把握のため。深さ制限あり）
+function collectKeys(obj: unknown, depth = 3, acc = new Set<string>(), seen = new Set<object>()): Set<string> {
+  if (depth < 0 || obj == null || typeof obj !== 'object' || seen.has(obj)) return acc
+  seen.add(obj)
+  for (const [k, v] of Object.entries(obj)) {
+    acc.add(k)
+    if (v && typeof v === 'object') collectKeys(v, depth - 1, acc, seen)
+  }
+  return acc
+}
+
+const f = (v: string | undefined, label: string) => (v ? `【${label}】\n${v}` : undefined)
+
+// Inertiaの data-page JSON から求人下書きを組み立てる
+function scrapeJobinsJson(page: unknown, url: string): JobDraft {
+  const draft: JobDraft = { source: 'jobins', sourceUrl: url }
+  // props配下に求人データがある想定。無ければpage全体を対象にする
+  const props = (page && typeof page === 'object' && 'props' in page)
+    ? (page as { props: unknown }).props : page
+
+  draft.company = deepFindString(props, ['company_name', 'companyName', 'corporation_name', 'client_name', 'company', 'employer_name'])
+  draft.title = deepFindString(props, ['job_title', 'jobTitle', 'position_name', 'position', 'occupation_name', 'title', 'job_name', 'name'])
+  draft.salary = deepFindString(props, ['annual_income', 'annualIncome', 'expected_salary', 'salary_range', 'income_range', 'salary', 'income', 'annual_salary'])
+  draft.area = deepFindString(props, ['work_location', 'workplace', 'work_place', 'location', 'prefecture_name', 'prefecture', 'area', 'work_address', 'address'])
+  draft.employment = deepFindString(props, ['employment_type', 'employmentType', 'contract_type', 'employment', 'employment_status', 'work_style'])
+
+  const detailParts = [
+    f(deepFindString(props, ['job_description', 'jobDescription', 'business_content', 'job_content', 'work_content', 'description', 'detail']), '仕事内容'),
+    f(deepFindString(props, ['application_requirement', 'requirement', 'required_condition', 'qualification', 'must_condition', 'required_skill']), '応募条件'),
+    f(deepFindString(props, ['welcome_condition', 'preferred_condition', 'welcome_requirement', 'want_condition', 'welcome_skill']), '歓迎条件'),
+    f(deepFindString(props, ['selection_flow', 'selection_process', 'interview_flow', 'process', 'flow']), '選考フロー'),
+    f(deepFindString(props, ['salary_detail', 'salaryDetail', 'income_detail', 'treatment', 'benefit']), '給与・待遇'),
+  ].filter(Boolean)
+  if (detailParts.length) draft.detail = detailParts.join('\n\n')
+
+  return draft
+}
+
+// 描画済みDOM向け：ラベル(h2/h3)走査で解析（貼り付けHTML等のフォールバック）
+function scrapeJobinsDom(html: string, url: string): JobDraft {
   const draft: JobDraft = { source: 'jobins', sourceUrl: url }
   const root = parse(html)
 
-  // 企業名：ヘッダーのナビ内テキスト
   const navText = root.querySelector('nav span')?.text?.trim()
   if (navText) draft.company = navText
 
-  // 求人名：太字の見出しテキスト
   const titleEl = root.querySelectorAll('p').find(p => p.classNames.includes('jb-font-medium'))
   if (titleEl) draft.title = titleEl.text.trim()
 
-  // ラベル(h2/h3)→値 を収集（値は親要素テキストからラベルを除いたもの）
   const pairs: { label: string; value: string }[] = []
   for (const el of root.querySelectorAll('h2, h3')) {
     const label = el.text.trim()
@@ -156,8 +237,6 @@ function scrapeJobins(html: string, url: string): JobDraft {
     value = value.replace(/\s+\n/g, '\n').trim()
     if (value && value !== label) pairs.push({ label, value })
   }
-
-  // 同一ラベルから最短値（単一項目向け）/最長値（本文向け）を取得
   const shortest = (label: string) => {
     const vs = pairs.filter(p => p.label === label).map(p => p.value)
     return vs.length ? vs.reduce((a, b) => (a.length <= b.length ? a : b)) : undefined
@@ -166,23 +245,39 @@ function scrapeJobins(html: string, url: string): JobDraft {
     const vs = pairs.filter(p => p.label === label).map(p => p.value)
     return vs.length ? vs.reduce((a, b) => (a.length >= b.length ? a : b)) : undefined
   }
-
   draft.salary = shortest('年収')
   draft.area = shortest('勤務地')
   draft.employment = shortest('雇用形態')
-
   const detailParts = [
-    longest('仕事内容') && `【仕事内容】\n${longest('仕事内容')}`,
-    longest('応募条件') && `【応募条件】\n${longest('応募条件')}`,
-    longest('歓迎条件') && `【歓迎条件】\n${longest('歓迎条件')}`,
-    longest('選考フロー') && `【選考フロー】\n${longest('選考フロー')}`,
-    longest('給与詳細') && `【給与詳細】\n${longest('給与詳細')}`,
+    f(longest('仕事内容'), '仕事内容'),
+    f(longest('応募条件'), '応募条件'),
+    f(longest('歓迎条件'), '歓迎条件'),
+    f(longest('選考フロー'), '選考フロー'),
+    f(longest('給与詳細'), '給与詳細'),
   ].filter(Boolean)
   if (detailParts.length) draft.detail = detailParts.join('\n\n')
 
-  // ジョビンズの公開ページに手数料率は出ないため feeRate は未設定（手入力）
-
   return draft
+}
+
+function scrapeJobins(html: string, url: string): JobDraft {
+  // 1) 埋め込みJSON（Inertia data-page）を優先
+  const page = extractInertiaPage(html)
+  if (page) {
+    const draft = scrapeJobinsJson(page, url)
+    if (draft.company || draft.title) return draft
+    // JSONはあるが項目が取れない → 構造を診断に残してDOMへ
+    const props = (page && typeof page === 'object' && 'props' in page)
+      ? (page as { props: unknown }).props : page
+    const keys = [...collectKeys(props)].slice(0, 60).join(', ')
+    const domDraft = scrapeJobinsDom(html, url)
+    if (!domDraft.company && !domDraft.title) {
+      domDraft._debug = { fetched: true, extracted: false, snippet: `data-page検出/項目未一致。keys: ${keys}` }
+    }
+    return domDraft
+  }
+  // 2) DOM走査（描画済みHTML向け）
+  return scrapeJobinsDom(html, url)
 }
 
 // 与えられたHTMLから下書きを抽出する（サーバー取得できない場合に、ブラウザのHTMLを貼り付けて使う）。
