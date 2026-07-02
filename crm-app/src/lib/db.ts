@@ -179,7 +179,9 @@ export async function deleteProposal(id: string) {
 }
 
 // ========== CA別KPI自動集計 ==========
-// month: 'YYYY-MM'。面談はMeeting、求人提案/選考/内定/承諾はJobProposalから集計する。
+// month: 'YYYY-MM'。面談設定数/初回面談数はMeetingの面談日基準で集計する。
+// 求人提案数/選考数/内定数/内定承諾数は、求職者の初回面談月を基準に集計する
+// （その求職者への提案・選考等が実際に発生した月ではなく、初回面談があった月の実績として計上する）。
 export async function getKpi(month: string): Promise<KpiRow[]> {
   // 月初〜翌月初（[start, end)）
   const [y, m] = month.split('-').map(Number)
@@ -211,8 +213,25 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     console.error('getKpi: meeting query failed', e)
   }
   try {
+    // 求人提案以降(求人提案数/選考数/内定数/内定承諾数)は「発生日」ではなく
+    // 「初回面談月」を基準に集計する。例: 6月に初回面談をした求職者が7月に
+    // 求人提案されても、その提案は6月の実績として数える。
+    // そのため、まず対象月に初回面談（最も古い非キャンセル面談）を迎えた
+    // 求職者を特定し、その求職者の提案を発生時期に関わらずすべて集計する。
+    const firstMeetingByCustomer = await prisma.meeting.groupBy({
+      by: ['customerId'],
+      where: { status: { not: 'キャンセル' }, date: { not: null } },
+      _min: { date: true },
+    })
+    const cohortCustomerIds = firstMeetingByCustomer
+      .filter((f) => {
+        const d = f._min.date
+        return d && d >= start && d < end
+      })
+      .map((f) => f.customerId)
+
     proposals = await prisma.jobProposal.findMany({
-      where: { proposedAt: { gte: start, lt: end } },
+      where: { customerId: { in: cohortCustomerIds } },
       select: { ca: true, status: true, customerId: true },
     })
   } catch (e) {
