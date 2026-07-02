@@ -159,16 +159,21 @@ export function JobFormModal({
               </button>
             </div>
 
-            {/* HTML貼り付けフォールバック（サーバー取得できない媒体向け） */}
+            {/* HTML貼り付けフォールバック（JoBins等はJSで描画されるため“描画後”のHTMLが必要） */}
             <button type="button" onClick={() => setShowPaste(v => !v)}
               className="text-xs text-blue-600 hover:underline">
-              {showPaste ? '▼' : '▶'} 取り込めない場合：ページのHTMLを貼り付けて取込
+              {showPaste ? '▼' : '▶'} 取り込めない場合：ページのHTMLを貼り付けて取込（ジョビンズはこちら）
             </button>
             {showPaste && (
               <div className="space-y-1.5">
-                <p className="text-[11px] text-gray-500 leading-relaxed">
-                  求人ページをブラウザで開き、右クリック→「ページのソースを表示」→全選択(⌘A)→コピー(⌘C) して、下に貼り付けてください。
-                </p>
+                <div className="text-[11px] text-gray-600 leading-relaxed bg-amber-50 border border-amber-100 rounded-md p-2 space-y-1">
+                  <p className="font-medium text-amber-800">
+                    ジョビンズは表示後にJavaScriptで中身が作られるため「ページのソースを表示」では取れません。次のどちらかで“描画後のHTML”をコピーしてください。
+                  </p>
+                  <p><b>かんたんな方法（推奨）：</b> 求人ページ上で右クリック→「検証」→上部の「Console」タブ→ 下の1行を貼って Enter → 自動でコピーされるので、この欄に貼り付け(⌘V)。</p>
+                  <code className="block bg-white border rounded px-2 py-1 select-all font-mono text-[11px]">copy(document.documentElement.outerHTML)</code>
+                  <p><b>別の方法：</b> 右クリック→「検証」→「Elements(要素)」タブで一番上の <code>&lt;html&gt;</code> を右クリック→ Copy →「Copy outerHTML」。</p>
+                </div>
                 <textarea value={htmlPaste} onChange={e => setHtmlPaste(e.target.value)} rows={4}
                   placeholder="<html> ... </html>" className={inp + ' font-mono text-[11px] resize-y'} />
                 <button onClick={() => runScrape(htmlPaste)} disabled={scraping || !url || !htmlPaste}
