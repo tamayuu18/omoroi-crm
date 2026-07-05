@@ -117,6 +117,10 @@ export async function getMeetings(filters?: { customerId?: string }) {
   return prisma.meeting.findMany({ where, orderBy: { date: 'desc' } })
 }
 
+export async function createMeeting(data: Omit<Meeting, 'id' | 'createdAt'>) {
+  return prisma.meeting.create({ data })
+}
+
 export async function updateMeeting(id: string, data: Partial<Meeting>) {
   return prisma.meeting.update({ where: { id }, data })
 }
