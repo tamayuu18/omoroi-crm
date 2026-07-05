@@ -473,6 +473,64 @@ function AddTaskModal({ customer, onClose, onUpdate }: ModalProps) {
   )
 }
 
+// ========== Add Meeting Modal ==========
+function AddMeetingModal({ customer, onClose, onUpdate }: ModalProps) {
+  const [date, setDate] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [method, setMethod] = useState('対面')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    if (!date) return
+    setLoading(true)
+    try {
+      await fetch('/api/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: customer.id,
+          name: customer.name,
+          ca: customer.ca,
+          date,
+          startTime,
+          endTime,
+          method,
+        }),
+      })
+      onUpdate()
+      onClose()
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h2 className="text-lg font-bold text-gray-900 mb-4">面談予定を追加</h2>
+        <div className="space-y-3">
+          <Row label="面談日 *"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inp} /></Row>
+          <div className="grid grid-cols-2 gap-3">
+            <Row label="開始時刻"><input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={inp} /></Row>
+            <Row label="終了時刻"><input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={inp} /></Row>
+          </div>
+          <Row label="方法">
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className={inp}>
+              {['対面', 'オンライン', '電話'].map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Row>
+        </div>
+        <div className="flex gap-2 justify-end mt-4">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
+          <button onClick={handleSubmit} disabled={loading || !date}
+            className="px-4 py-2 text-sm bg-[#0070D2] text-white rounded-lg hover:bg-[#005fb2] disabled:opacity-50">
+            {loading ? '追加中...' : '追加する'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ========== Add History Modal ==========
 function AddHistoryModal({ customer, onClose, onUpdate }: ModalProps) {
   const [type, setType] = useState('電話')
@@ -839,6 +897,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
   const [showYomiModal, setShowYomiModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showTaskModal, setShowTaskModal] = useState(false)
+  const [showMeetingModal, setShowMeetingModal] = useState(false)
   const [showLreachModal, setShowLreachModal] = useState(false)
   const [editingRecommendation, setEditingRecommendation] = useState(false)
   const [recommendationText, setRecommendationText] = useState('')
@@ -1151,11 +1210,19 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
 
             {/* 面談タブ */}
             {tab === 'meetings' && (
-              meetings.length === 0 ? <EmptyState message="面談記録がありません" /> : (
+              <div>
+                <div className="flex justify-end mb-3">
+                  <button onClick={() => setShowMeetingModal(true)}
+                    className="flex items-center gap-1.5 text-sm bg-[#0070D2] text-white px-3 py-1.5 rounded-lg hover:bg-[#005fb2] transition-colors">
+                    <span className="text-base leading-none">+</span> 面談予定を追加
+                  </button>
+                </div>
+              {meetings.length === 0 ? <EmptyState message="面談記録がありません" /> : (
                 <div className="space-y-3">
                   {meetings.map((m) => <MeetingItem key={m.id} m={m} onUpdate={fetchAll} />)}
                 </div>
-              )
+              )}
+              </div>
             )}
 
             {/* 提案求人タブ */}
@@ -1228,6 +1295,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
       {showHistoryModal && <AddHistoryModal customer={customer} onClose={() => setShowHistoryModal(false)} onUpdate={fetchAll} />}
       {showEditModal && <EditInfoModal customer={customer} onClose={() => setShowEditModal(false)} onUpdate={fetchAll} />}
       {showTaskModal && <AddTaskModal customer={customer} onClose={() => setShowTaskModal(false)} onUpdate={fetchAll} />}
+      {showMeetingModal && <AddMeetingModal customer={customer} onClose={() => setShowMeetingModal(false)} onUpdate={fetchAll} />}
       {showLreachModal && <LreachImportModal customer={customer} onClose={() => setShowLreachModal(false)} onUpdate={fetchAll} />}
     </div>
   )
