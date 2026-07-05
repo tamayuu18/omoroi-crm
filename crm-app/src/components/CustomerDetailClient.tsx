@@ -649,6 +649,87 @@ function HistoryItem({ h, onUpdate }: { h: History; onUpdate: () => void }) {
   )
 }
 
+// ========== Inline Meeting Item ==========
+function MeetingItem({ m, onUpdate }: { m: Meeting; onUpdate: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({
+    date: fmtInput(m.date),
+    startTime: m.startTime ?? '',
+    endTime: m.endTime ?? '',
+    method: m.method ?? '',
+    status: m.status ?? '予約済',
+    temp: m.temp ?? '',
+    result: m.result ?? '',
+  })
+  const [loading, setLoading] = useState(false)
+
+  async function handleSave() {
+    setLoading(true)
+    try {
+      await fetch(`/api/meetings/${m.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      onUpdate()
+      setEditing(false)
+    } finally { setLoading(false) }
+  }
+
+  if (editing) {
+    return (
+      <div className="border border-blue-200 rounded-lg p-3 text-sm bg-blue-50 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className={inp} />
+          <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className={inp}>
+            {['予約済', '完了', 'キャンセル'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input type="time" value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))} className={inp} placeholder="開始時刻" />
+          <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className={inp} placeholder="終了時刻" />
+        </div>
+        <input value={form.method} onChange={e => setForm(f => ({ ...f, method: e.target.value }))} placeholder="方法（例: オンライン）" className={inp} />
+        <input value={form.temp} onChange={e => setForm(f => ({ ...f, temp: e.target.value }))} placeholder="温度感" className={inp} />
+        <input value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))} placeholder="結果" className={inp} />
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setEditing(false)} className="flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">
+            <X size={12} />キャンセル
+          </button>
+          <button onClick={handleSave} disabled={loading}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#0070D2] text-white rounded-lg disabled:opacity-50">
+            <Check size={12} />{loading ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-gray-100 rounded-lg p-4 text-sm group">
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-medium text-gray-900">
+          {fmt(m.date)} {m.startTime && `${m.startTime}〜${m.endTime}`}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={cn('text-xs px-2 py-0.5 rounded-full',
+            m.status === '完了' ? 'bg-green-100 text-green-700'
+            : m.status === 'キャンセル' ? 'bg-red-100 text-red-700'
+            : 'bg-blue-100 text-blue-700')}>{m.status}</span>
+          <button onClick={() => setEditing(true)}
+            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-500 transition-opacity">
+            <Pencil size={12} />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+        <div>方法: {m.method}</div>
+        <div>温度感: {m.temp}</div>
+        {m.result && <div className="col-span-2">結果: {m.result}</div>}
+        {m.nextAction && <div className="col-span-2 text-blue-600">次回: {m.nextAction} ({fmt(m.nextDeadline)})</div>}
+      </div>
+    </div>
+  )
+}
+
 // ========== Inline Task Item ==========
 function TaskItem({ t, onUpdate }: { t: Task; onUpdate: () => void }) {
   const [editing, setEditing] = useState(false)
@@ -1072,25 +1153,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
             {tab === 'meetings' && (
               meetings.length === 0 ? <EmptyState message="面談記録がありません" /> : (
                 <div className="space-y-3">
-                  {meetings.map((m) => (
-                    <div key={m.id} className="border border-gray-100 rounded-lg p-4 text-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="font-medium text-gray-900">
-                          {fmt(m.date)} {m.startTime && `${m.startTime}〜${m.endTime}`}
-                        </div>
-                        <span className={cn('text-xs px-2 py-0.5 rounded-full',
-                          m.status === '完了' ? 'bg-green-100 text-green-700'
-                          : m.status === 'キャンセル' ? 'bg-red-100 text-red-700'
-                          : 'bg-blue-100 text-blue-700')}>{m.status}</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                        <div>方法: {m.method}</div>
-                        <div>温度感: {m.temp}</div>
-                        {m.result && <div className="col-span-2">結果: {m.result}</div>}
-                        {m.nextAction && <div className="col-span-2 text-blue-600">次回: {m.nextAction} ({fmt(m.nextDeadline)})</div>}
-                      </div>
-                    </div>
-                  ))}
+                  {meetings.map((m) => <MeetingItem key={m.id} m={m} onUpdate={fetchAll} />)}
                 </div>
               )
             )}
