@@ -86,13 +86,23 @@ export function ProposalSection({
   }
   useEffect(() => { loadJobs() }, [])
 
-  // 新規求人を登録して、その場でこの顧客への提案を作成する
-  async function createJobAndPropose(job: Job) {
-    await fetch('/api/proposals', {
+  async function postProposal(jobId: string) {
+    const res = await fetch('/api/proposals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerId, jobId: job.id, ca, status: '提案' }),
+      body: JSON.stringify({ customerId, jobId, ca, status: '提案' }),
     })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      alert(body?.error ?? '提案の作成に失敗しました')
+      return false
+    }
+    return true
+  }
+
+  // 新規求人を登録して、その場でこの顧客への提案を作成する
+  async function createJobAndPropose(job: Job) {
+    await postProposal(job.id)
     loadJobs()
     onUpdate()
   }
@@ -101,11 +111,7 @@ export function ProposalSection({
     if (!selectedJob) return
     setSaving(true)
     try {
-      await fetch('/api/proposals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, jobId: selectedJob, ca, status: '提案' }),
-      })
+      if (!(await postProposal(selectedJob))) return
       setSelectedJob('')
       setAdding(false)
       onUpdate()
@@ -115,26 +121,29 @@ export function ProposalSection({
   }
 
   async function changeStatus(id: string, status: string) {
-    await fetch(`/api/proposals/${id}`, {
+    const res = await fetch(`/api/proposals/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     })
+    if (!res.ok) { alert('ステータスの更新に失敗しました'); return }
     onUpdate()
   }
 
   async function changeInterviewDate(id: string, interviewDate: string) {
-    await fetch(`/api/proposals/${id}`, {
+    const res = await fetch(`/api/proposals/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ interviewDate }),
     })
+    if (!res.ok) { alert('面接日の更新に失敗しました'); return }
     onUpdate()
   }
 
   async function remove(p: JobProposalWithJob) {
     if (!confirm(`「${p.job.company} / ${p.job.title}」の提案を削除しますか？`)) return
-    await fetch(`/api/proposals/${p.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/proposals/${p.id}`, { method: 'DELETE' })
+    if (!res.ok) { alert('削除に失敗しました'); return }
     onUpdate()
   }
 
