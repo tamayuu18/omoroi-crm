@@ -174,7 +174,7 @@ export async function getProposals(filters?: { customerId?: string; jobId?: stri
   })
 }
 
-export async function createProposal(data: Omit<JobProposal, 'id' | 'createdAt' | 'updatedAt' | 'proposedAt' | 'decidedAt'> & { proposedAt?: Date }) {
+export async function createProposal(data: Omit<JobProposal, 'id' | 'createdAt' | 'updatedAt' | 'proposedAt' | 'decidedAt' | 'interviewDate'> & { proposedAt?: Date }) {
   return prisma.jobProposal.create({ data, include: { job: true } })
 }
 

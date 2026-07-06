@@ -1,11 +1,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, ExternalLink, Link2, Copy, Check } from 'lucide-react'
+import { Plus, Trash2, ExternalLink, Link2, Copy, Check, Calendar } from 'lucide-react'
+import { format, parseISO } from 'date-fns'
 import type { Job, JobProposalWithJob } from '@/types'
 import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
 import { JobFormModal } from '@/components/JobFormModal'
 import { cn } from '@/lib/utils'
+
+function fmtInput(d: Date | string | null | undefined) {
+  if (!d) return ''
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy-MM-dd') } catch { return '' }
+}
 
 const statusColor = (s: string) =>
   PROPOSAL_OFFER_STATUSES.includes(s) ? 'bg-purple-100 text-purple-700'
@@ -117,6 +123,15 @@ export function ProposalSection({
     onUpdate()
   }
 
+  async function changeInterviewDate(id: string, interviewDate: string) {
+    await fetch(`/api/proposals/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interviewDate }),
+    })
+    onUpdate()
+  }
+
   async function remove(p: JobProposalWithJob) {
     if (!confirm(`「${p.job.company} / ${p.job.title}」の提案を削除しますか？`)) return
     await fetch(`/api/proposals/${p.id}`, { method: 'DELETE' })
@@ -197,6 +212,13 @@ export function ProposalSection({
                         求人票 <ExternalLink size={11} />
                       </a>
                     )}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
+                    <Calendar size={12} className="text-gray-400" />
+                    面接日
+                    <input type="date" value={fmtInput(p.interviewDate)}
+                      onChange={e => changeInterviewDate(p.id, e.target.value)}
+                      className="border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-600" />
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
