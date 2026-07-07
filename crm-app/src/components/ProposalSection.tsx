@@ -13,6 +13,11 @@ function fmtInput(d: Date | string | null | undefined) {
   try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy-MM-dd') } catch { return '' }
 }
 
+function fmtDateTime(d: Date | string | null | undefined) {
+  if (!d) return ''
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd HH:mm') } catch { return '' }
+}
+
 const statusColor = (s: string) =>
   PROPOSAL_OFFER_STATUSES.includes(s) ? 'bg-purple-100 text-purple-700'
   : s === '承諾' ? 'bg-green-100 text-green-700'
@@ -36,6 +41,8 @@ export function ProposalSection({
   // コピー用に選択中の提案ID（初期は全選択）
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState(false)
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
+  const [addingNote, setAddingNote] = useState<Record<string, boolean>>({})
 
   // 提案の増減時のみ全選択に初期化（ステータス変更では選択を維持）
   const proposalIds = proposals.map(p => p.id).join(',')
@@ -147,6 +154,29 @@ export function ProposalSection({
     onUpdate()
   }
 
+  // 社内メモは追記専用（編集・削除UIは設けない＝過去のメモは絶対に消えない）
+  async function addNote(id: string) {
+    const content = (noteDrafts[id] ?? '').trim()
+    if (!content) return
+    setAddingNote(prev => ({ ...prev, [id]: true }))
+    try {
+      const res = await fetch(`/api/proposals/${id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        alert(body?.error ?? 'メモの追加に失敗しました')
+        return
+      }
+      setNoteDrafts(prev => ({ ...prev, [id]: '' }))
+      onUpdate()
+    } finally {
+      setAddingNote(prev => ({ ...prev, [id]: false }))
+    }
+  }
+
   // 既に提案済みの求人は候補から除外
   const proposedJobIds = new Set(proposals.map(p => p.jobId))
   const availableJobs = jobs.filter(j => !proposedJobIds.has(j.id))
@@ -236,6 +266,33 @@ export function ProposalSection({
                     {PROPOSAL_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <button onClick={() => remove(p)} className="p-1 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                </div>
+              </div>
+
+              <div className="mt-2 pl-6 border-t border-gray-100 pt-2">
+                <p className="text-xs text-gray-400 mb-1">社内メモ（追記のみ・削除不可）</p>
+                {p.proposalNotes.length > 0 && (
+                  <div className="space-y-1 mb-1.5">
+                    {p.proposalNotes.map(n => (
+                      <div key={n.id} className="text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+                        <p className="whitespace-pre-wrap">{n.content}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {fmtDateTime(n.createdAt)}{n.createdBy && ` / ${n.createdBy}`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-1.5">
+                  <input value={noteDrafts[p.id] ?? ''}
+                    onChange={e => setNoteDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') addNote(p.id) }}
+                    placeholder="メモを追加"
+                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs" />
+                  <button onClick={() => addNote(p.id)} disabled={!(noteDrafts[p.id] ?? '').trim() || addingNote[p.id]}
+                    className="shrink-0 text-xs px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                    追加
+                  </button>
                 </div>
               </div>
             </div>

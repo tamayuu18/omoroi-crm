@@ -88,9 +88,23 @@ model JobProposal {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  proposalNotes ProposalNote[]
+
   @@index([customerId])
   @@index([jobId])
   @@index([proposedAt])
+}
+
+// 提案ごとの社内メモ（追記専用・編集/削除UIなし＝過去の記録は消えない）
+model ProposalNote {
+  id         String      @id @default(cuid())
+  proposalId String
+  proposal   JobProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  content    String
+  createdBy  String?
+  createdAt  DateTime    @default(now())
+
+  @@index([proposalId])
 }
 
 model Task {

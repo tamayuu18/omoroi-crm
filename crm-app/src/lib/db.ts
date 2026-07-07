@@ -1,5 +1,5 @@
 import { prisma } from './prisma'
-import type { Customer, Task, Meeting, History, Job, JobProposal } from '@prisma/client'
+import type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote } from '@prisma/client'
 import {
   CA_OPTIONS,
   PROPOSAL_SELECTION_STATUSES,
@@ -8,7 +8,7 @@ import {
 } from './constants'
 import type { KpiRow } from '@/types'
 
-export type { Customer, Task, Meeting, History, Job, JobProposal }
+export type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote }
 
 export async function getCustomers(filters?: { status?: string; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string }) {
   const where: any = {}
@@ -169,21 +169,26 @@ export async function getProposals(filters?: { customerId?: string; jobId?: stri
   if (filters?.jobId) where.jobId = filters.jobId
   return prisma.jobProposal.findMany({
     where,
-    include: { job: true },
+    include: { job: true, proposalNotes: { orderBy: { createdAt: 'asc' } } },
     orderBy: { proposedAt: 'desc' },
   })
 }
 
 export async function createProposal(data: Omit<JobProposal, 'id' | 'createdAt' | 'updatedAt' | 'proposedAt' | 'decidedAt' | 'interviewDate'> & { proposedAt?: Date }) {
-  return prisma.jobProposal.create({ data, include: { job: true } })
+  return prisma.jobProposal.create({ data, include: { job: true, proposalNotes: true } })
 }
 
 export async function updateProposal(id: string, data: Partial<JobProposal>) {
-  return prisma.jobProposal.update({ where: { id }, data, include: { job: true } })
+  return prisma.jobProposal.update({ where: { id }, data, include: { job: true, proposalNotes: { orderBy: { createdAt: 'asc' } } } })
 }
 
 export async function deleteProposal(id: string) {
   return prisma.jobProposal.delete({ where: { id } })
+}
+
+// ========== 提案ごとの社内メモ（追記専用） ==========
+export async function addProposalNote(proposalId: string, data: { content: string; createdBy?: string | null }) {
+  return prisma.proposalNote.create({ data: { proposalId, content: data.content, createdBy: data.createdBy ?? null } })
 }
 
 // ========== CA別KPI自動集計 ==========
