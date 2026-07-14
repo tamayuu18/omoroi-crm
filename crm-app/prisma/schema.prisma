@@ -78,18 +78,33 @@ model JobProposal {
   customerId String
   customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   jobId      String
-  job        Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job        Job       @relation(fields: [jobId], references: [id], onDelete: Restrict)
   ca         String?
   status     String    @default("提案")  // 提案/意思確認/応募/書類選考/面接/内定/承諾/辞退/見送り
   proposedAt DateTime  @default(now())
+  interviewDate DateTime? // 面接日
   decidedAt  DateTime?
   note       String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  proposalNotes ProposalNote[]
+
   @@index([customerId])
   @@index([jobId])
   @@index([proposedAt])
+}
+
+// 提案ごとの社内メモ（追記専用・編集/削除UIなし＝過去の記録は消えない）
+model ProposalNote {
+  id         String      @id @default(cuid())
+  proposalId String
+  proposal   JobProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  content    String
+  createdBy  String?
+  createdAt  DateTime    @default(now())
+
+  @@index([proposalId])
 }
 
 model Task {

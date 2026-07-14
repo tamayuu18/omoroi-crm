@@ -74,9 +74,9 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // 同じtimerexIdの面談が既にあればスキップ
+      // 同じ日時の面談が既にあればスキップ（キャンセル済みは再予約とみなし対象外）
       const existingMeeting = await prisma.meeting.findFirst({
-        where: { customerId: customer.id, date: startDatetime ?? undefined },
+        where: { customerId: customer.id, date: startDatetime ?? undefined, status: { not: 'キャンセル' } },
       })
 
       if (!existingMeeting) {

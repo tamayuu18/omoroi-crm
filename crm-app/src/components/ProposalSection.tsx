@@ -1,11 +1,22 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, ExternalLink, Link2, Copy, Check } from 'lucide-react'
+import { Plus, Trash2, ExternalLink, Link2, Copy, Check, Calendar } from 'lucide-react'
+import { format, parseISO } from 'date-fns'
 import type { Job, JobProposalWithJob } from '@/types'
 import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
 import { JobFormModal } from '@/components/JobFormModal'
 import { cn } from '@/lib/utils'
+
+function fmtInput(d: Date | string | null | undefined) {
+  if (!d) return ''
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy-MM-dd') } catch { return '' }
+}
+
+function fmtDateTime(d: Date | string | null | undefined) {
+  if (!d) return ''
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd HH:mm') } catch { return '' }
+}
 
 const statusColor = (s: string) =>
   PROPOSAL_OFFER_STATUSES.includes(s) ? 'bg-purple-100 text-purple-700'
@@ -30,6 +41,8 @@ export function ProposalSection({
   // コピー用に選択中の提案ID（初期は全選択）
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState(false)
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
+  const [addingNote, setAddingNote] = useState<Record<string, boolean>>({})
 
   // 提案の増減時のみ全選択に初期化（ステータス変更では選択を維持）
   const proposalIds = proposals.map(p => p.id).join(',')
@@ -80,13 +93,23 @@ export function ProposalSection({
   }
   useEffect(() => { loadJobs() }, [])
 
-  // 新規求人を登録して、その場でこの顧客への提案を作成する
-  async function createJobAndPropose(job: Job) {
-    await fetch('/api/proposals', {
+  async function postProposal(jobId: string) {
+    const res = await fetch('/api/proposals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerId, jobId: job.id, ca, status: '提案' }),
+      body: JSON.stringify({ customerId, jobId, ca, status: '提案' }),
     })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      alert(body?.error ?? '提案の作成に失敗しました')
+      return false
+    }
+    return true
+  }
+
+  // 新規求人を登録して、その場でこの顧客への提案を作成する
+  async function createJobAndPropose(job: Job) {
+    await postProposal(job.id)
     loadJobs()
     onUpdate()
   }
@@ -95,11 +118,7 @@ export function ProposalSection({
     if (!selectedJob) return
     setSaving(true)
     try {
-      await fetch('/api/proposals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, jobId: selectedJob, ca, status: '提案' }),
-      })
+      if (!(await postProposal(selectedJob))) return
       setSelectedJob('')
       setAdding(false)
       onUpdate()
@@ -109,18 +128,53 @@ export function ProposalSection({
   }
 
   async function changeStatus(id: string, status: string) {
-    await fetch(`/api/proposals/${id}`, {
+    const res = await fetch(`/api/proposals/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     })
+    if (!res.ok) { alert('ステータスの更新に失敗しました'); return }
+    onUpdate()
+  }
+
+  async function changeInterviewDate(id: string, interviewDate: string) {
+    const res = await fetch(`/api/proposals/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interviewDate }),
+    })
+    if (!res.ok) { alert('面接日の更新に失敗しました'); return }
     onUpdate()
   }
 
   async function remove(p: JobProposalWithJob) {
     if (!confirm(`「${p.job.company} / ${p.job.title}」の提案を削除しますか？`)) return
-    await fetch(`/api/proposals/${p.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/proposals/${p.id}`, { method: 'DELETE' })
+    if (!res.ok) { alert('削除に失敗しました'); return }
     onUpdate()
+  }
+
+  // 社内メモは追記専用（編集・削除UIは設けない＝過去のメモは絶対に消えない）
+  async function addNote(id: string) {
+    const content = (noteDrafts[id] ?? '').trim()
+    if (!content) return
+    setAddingNote(prev => ({ ...prev, [id]: true }))
+    try {
+      const res = await fetch(`/api/proposals/${id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        alert(body?.error ?? 'メモの追加に失敗しました')
+        return
+      }
+      setNoteDrafts(prev => ({ ...prev, [id]: '' }))
+      onUpdate()
+    } finally {
+      setAddingNote(prev => ({ ...prev, [id]: false }))
+    }
   }
 
   // 既に提案済みの求人は候補から除外
@@ -198,6 +252,13 @@ export function ProposalSection({
                       </a>
                     )}
                   </div>
+                  <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
+                    <Calendar size={12} className="text-gray-400" />
+                    面接日
+                    <input type="date" value={fmtInput(p.interviewDate)}
+                      onChange={e => changeInterviewDate(p.id, e.target.value)}
+                      className="border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-600" />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <select value={p.status} onChange={e => changeStatus(p.id, e.target.value)}
@@ -205,6 +266,33 @@ export function ProposalSection({
                     {PROPOSAL_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <button onClick={() => remove(p)} className="p-1 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                </div>
+              </div>
+
+              <div className="mt-2 pl-6 border-t border-gray-100 pt-2">
+                <p className="text-xs text-gray-400 mb-1">社内メモ（追記のみ・削除不可）</p>
+                {p.proposalNotes.length > 0 && (
+                  <div className="space-y-1 mb-1.5">
+                    {p.proposalNotes.map(n => (
+                      <div key={n.id} className="text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+                        <p className="whitespace-pre-wrap">{n.content}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {fmtDateTime(n.createdAt)}{n.createdBy && ` / ${n.createdBy}`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-1.5">
+                  <input value={noteDrafts[p.id] ?? ''}
+                    onChange={e => setNoteDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') addNote(p.id) }}
+                    placeholder="メモを追加"
+                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs" />
+                  <button onClick={() => addNote(p.id)} disabled={!(noteDrafts[p.id] ?? '').trim() || addingNote[p.id]}
+                    className="shrink-0 text-xs px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                    追加
+                  </button>
                 </div>
               </div>
             </div>
