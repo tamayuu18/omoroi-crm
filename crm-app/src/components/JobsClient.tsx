@@ -38,7 +38,12 @@ export function JobsClient() {
 
   async function handleDelete(job: Job) {
     if (!confirm(`「${job.company} / ${job.title}」を削除しますか？`)) return
-    await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      alert(body?.error ?? '求人の削除に失敗しました')
+      return
+    }
     fetchJobs()
   }
 

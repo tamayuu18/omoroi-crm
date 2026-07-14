@@ -15,6 +15,8 @@ export async function PATCH(
   try {
     const body = await request.json()
     const data: any = { ...body }
+    if (body.interviewDate === '') data.interviewDate = null
+    if (body.interviewDate && typeof body.interviewDate === 'string') data.interviewDate = new Date(body.interviewDate)
     // 内定以降に到達したら決着日を記録（未到達に戻ったらクリア）
     if (typeof body.status === 'string') {
       data.decidedAt = [...PROPOSAL_OFFER_STATUSES, '辞退', '見送り'].includes(body.status)

@@ -1,9 +1,9 @@
-import type { Customer as PrismaCustomer, Task, Meeting, History as PrismaHistory, Yomi, Job, JobProposal } from '@prisma/client'
+import type { Customer as PrismaCustomer, Task, Meeting, History as PrismaHistory, Yomi, Job, JobProposal, ProposalNote } from '@prisma/client'
 
-export type { Task, Meeting, Yomi, Job, JobProposal }
+export type { Task, Meeting, Yomi, Job, JobProposal, ProposalNote }
 
-// 提案に紐づく求人情報を含めた表示用の型
-export type JobProposalWithJob = JobProposal & { job: Job }
+// 提案に紐づく求人情報・社内メモを含めた表示用の型
+export type JobProposalWithJob = JobProposal & { job: Job; proposalNotes: ProposalNote[] }
 
 // CA別KPI集計の1行
 export type KpiRow = {
