@@ -5,13 +5,14 @@ export type { Task, Meeting, Yomi, Job, JobProposal, ProposalNote }
 // 提案に紐づく求人情報・社内メモを含めた表示用の型
 export type JobProposalWithJob = JobProposal & { job: Job; proposalNotes: ProposalNote[] }
 
-// CA別KPI集計の1行
+// CA別KPI集計の1行（すべて人数ベース。同一求職者は各段階で1人として数える）
 export type KpiRow = {
   ca: string
   meetingsSet: number      // 面談設定数
   firstMeetings: number    // 初回面談数
   proposals: number        // 求人提案数
   selections: number       // 選考数
+  interviews: number       // 面接数
   offers: number           // 内定数
   accepted: number         // 内定承諾数
 }

@@ -16,6 +16,8 @@ export const PROPOSAL_STATUS_OPTIONS = [
 
 // KPI集計で「選考到達」とみなす提案ステータス
 export const PROPOSAL_SELECTION_STATUSES = ['応募', '書類選考', '面接', '内定', '承諾']
+// KPI集計で「面接到達」とみなす提案ステータス
+export const PROPOSAL_INTERVIEW_STATUSES = ['面接', '内定', '承諾']
 // KPI集計で「内定到達」とみなす提案ステータス
 export const PROPOSAL_OFFER_STATUSES = ['内定', '承諾']
 // KPI集計で「承諾」とみなす提案ステータス

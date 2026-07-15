@@ -25,6 +25,7 @@ function buildLines(r: KpiRow): MetricLine[] {
     { label: '初回面談数', value: r.firstMeetings, rateLabel: '面談実施率', rate: rate(r.firstMeetings, r.meetingsSet) },
     { label: '求人提案数', value: r.proposals, rateLabel: '求人提案率', rate: rate(r.proposals, r.firstMeetings) },
     { label: '選考数', value: r.selections, rateLabel: '求人承諾率', rate: rate(r.selections, r.proposals) },
+    { label: '面接数', value: r.interviews, rateLabel: '面接移行率', rate: rate(r.interviews, r.selections) },
     { label: '内定数', value: r.offers, rateLabel: '選考通過率', rate: rate(r.offers, r.selections) },
     { label: '内定承諾数', value: r.accepted, rateLabel: '内定承諾率', rate: rate(r.accepted, r.offers) },
   ]
@@ -32,7 +33,7 @@ function buildLines(r: KpiRow): MetricLine[] {
 
 function CaCard({ row }: { row: KpiRow }) {
   const lines = buildLines(row)
-  const total = row.meetingsSet + row.firstMeetings + row.proposals + row.selections + row.offers + row.accepted
+  const total = row.meetingsSet + row.firstMeetings + row.proposals + row.selections + row.interviews + row.offers + row.accepted
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
       <div className="px-4 py-2.5 border-b border-gray-100 font-bold text-gray-800">{row.ca}</div>
@@ -41,7 +42,9 @@ function CaCard({ row }: { row: KpiRow }) {
           {lines.map(l => (
             <tr key={l.label} className="border-b border-gray-50 last:border-0">
               <td className="py-1.5 px-4 text-gray-600 w-32">{l.label}</td>
-              <td className="py-1.5 px-2 text-right font-medium text-gray-900 w-10 tabular-nums">{l.value}</td>
+              <td className="py-1.5 px-2 text-right font-medium text-gray-900 w-14 tabular-nums whitespace-nowrap">
+                {l.value}<span className="text-xs font-normal text-gray-400 ml-0.5">人</span>
+              </td>
               <td className="py-1.5 px-2 text-gray-400 text-xs">{l.rateLabel}</td>
               <td className="py-1.5 px-4 text-right w-16">
                 {l.rate ? (
@@ -82,10 +85,11 @@ export function KpiClient() {
       firstMeetings: acc.firstMeetings + r.firstMeetings,
       proposals: acc.proposals + r.proposals,
       selections: acc.selections + r.selections,
+      interviews: acc.interviews + r.interviews,
       offers: acc.offers + r.offers,
       accepted: acc.accepted + r.accepted,
     }),
-    { ca: '全体', meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, offers: 0, accepted: 0 }
+    { ca: '全体', meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, interviews: 0, offers: 0, accepted: 0 }
   )
 
   const [y, m] = month.split('-')
@@ -105,7 +109,7 @@ export function KpiClient() {
       </div>
 
       <p className="text-xs text-gray-400">
-        面談設定数・初回面談数は面談日、求人提案数以降は求職者の初回面談月を基準に自動集計しています（{y}年{Number(m)}月に初回面談をした求職者について、その後の提案・選考・内定・承諾もこの月の実績として計上）。
+        すべての数値は人数ベースです（同じ求職者に複数の面談・提案があっても各段階で1人として計上）。面談設定数・初回面談数は面談日、求人提案数以降は求職者の初回面談月を基準に自動集計しています（{y}年{Number(m)}月に初回面談をした求職者について、その後の提案・選考・面接・内定・承諾もこの月の実績として計上）。
       </p>
 
       {loading ? (

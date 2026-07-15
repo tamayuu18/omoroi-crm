@@ -3,6 +3,7 @@ import type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote }
 import {
   CA_OPTIONS,
   PROPOSAL_SELECTION_STATUSES,
+  PROPOSAL_INTERVIEW_STATUSES,
   PROPOSAL_OFFER_STATUSES,
   PROPOSAL_ACCEPTED_STATUSES,
 } from './constants'
@@ -193,8 +194,9 @@ export async function addProposalNote(proposalId: string, data: { content: strin
 
 // ========== CA別KPI自動集計 ==========
 // month: 'YYYY-MM'。面談設定数/初回面談数はMeetingの面談日基準で集計する。
-// 求人提案数/選考数/内定数/内定承諾数は、求職者の初回面談月を基準に集計する
+// 求人提案数/選考数/面接数/内定数/内定承諾数は、求職者の初回面談月を基準に集計する
 // （その求職者への提案・選考等が実際に発生した月ではなく、初回面談があった月の実績として計上する）。
+// すべての指標は人数ベース：同一求職者に複数の面談・提案があっても各段階で1人として数える。
 export async function getKpi(month: string): Promise<KpiRow[]> {
   // 月初〜翌月初（[start, end)）
   const [y, m] = month.split('-').map(Number)
@@ -202,7 +204,7 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
   const end = new Date(y, m ?? 1, 1)
 
   const emptyRow = (ca: string): KpiRow =>
-    ({ ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, offers: 0, accepted: 0 })
+    ({ ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, interviews: 0, offers: 0, accepted: 0 })
 
   // 先に既定CAで行を初期化しておく（クエリが失敗しても必ずCA別カードが出るように）
   const rows = new Map<string, KpiRow>()
@@ -215,12 +217,12 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
   }
 
   // 面談と提案は別々に取得し、片方が失敗（例: 提案テーブル未作成）しても集計を続行する
-  let meetings: { ca: string | null; status: string; result: string | null; customer: { status: string } | null }[] = []
+  let meetings: { ca: string | null; status: string; result: string | null; customerId: string; customer: { status: string } | null }[] = []
   let proposals: { ca: string | null; status: string; customerId: string }[] = []
   try {
     meetings = await prisma.meeting.findMany({
       where: { date: { gte: start, lt: end }, status: { not: 'キャンセル' } },
-      select: { ca: true, status: true, result: true, customer: { select: { status: true } } },
+      select: { ca: true, status: true, result: true, customerId: true, customer: { select: { status: true } } },
     })
   } catch (e) {
     console.error('getKpi: meeting query failed', e)
@@ -259,27 +261,28 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     || (!!s && ['実施', '実施済', '面談実施済み', '完了'].includes(s))
     || (!!customerStatus && !PRE_INTERVIEW_STATUSES.includes(customerStatus))
 
-  for (const mtg of meetings) {
-    const row = rowFor(mtg.ca)
-    row.meetingsSet++
-    if (isHeld(mtg.status, mtg.result, mtg.customer?.status)) row.firstMeetings++
+  // すべての指標を人数で数えるため、CA×指標ごとに求職者IDの集合で重複を除外する
+  const seenCustomers = new Map<string, Set<string>>()
+  const countOnce = (ca: string | null | undefined, metric: keyof Omit<KpiRow, 'ca'>, customerId: string) => {
+    const key = `${ca || '未割当'}:${metric}`
+    let seen = seenCustomers.get(key)
+    if (!seen) { seen = new Set(); seenCustomers.set(key, seen) }
+    if (seen.has(customerId)) return
+    seen.add(customerId)
+    rowFor(ca)[metric]++
   }
 
-  // 求人提案数は提案(JobProposal)の件数ではなく、求人提案に進んだ求職者の人数で数える
-  // （同じ求職者に複数求人を提案しても1人としてカウントする）
-  const proposedCustomersByCa = new Map<string, Set<string>>()
+  for (const mtg of meetings) {
+    countOnce(mtg.ca, 'meetingsSet', mtg.customerId)
+    if (isHeld(mtg.status, mtg.result, mtg.customer?.status)) countOnce(mtg.ca, 'firstMeetings', mtg.customerId)
+  }
+
   for (const p of proposals) {
-    const row = rowFor(p.ca)
-    const key = p.ca || '未割当'
-    let seen = proposedCustomersByCa.get(key)
-    if (!seen) { seen = new Set(); proposedCustomersByCa.set(key, seen) }
-    if (!seen.has(p.customerId)) {
-      seen.add(p.customerId)
-      row.proposals++
-    }
-    if (PROPOSAL_SELECTION_STATUSES.includes(p.status)) row.selections++
-    if (PROPOSAL_OFFER_STATUSES.includes(p.status)) row.offers++
-    if (PROPOSAL_ACCEPTED_STATUSES.includes(p.status)) row.accepted++
+    countOnce(p.ca, 'proposals', p.customerId)
+    if (PROPOSAL_SELECTION_STATUSES.includes(p.status)) countOnce(p.ca, 'selections', p.customerId)
+    if (PROPOSAL_INTERVIEW_STATUSES.includes(p.status)) countOnce(p.ca, 'interviews', p.customerId)
+    if (PROPOSAL_OFFER_STATUSES.includes(p.status)) countOnce(p.ca, 'offers', p.customerId)
+    if (PROPOSAL_ACCEPTED_STATUSES.includes(p.status)) countOnce(p.ca, 'accepted', p.customerId)
   }
 
   // CA_OPTIONSの順を優先、その他は後ろに
