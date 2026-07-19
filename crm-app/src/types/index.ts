@@ -20,6 +20,8 @@ export type KpiRow = {
 export type Customer = PrismaCustomer & {
   expectedRevenue?: string | null
   feeRate?: string | null
+  birthDate?: string | null
+  education?: string | null
   meetings?: Pick<Meeting, 'date'>[]
   tasks?: Pick<Task, 'id'>[]
 }

@@ -112,6 +112,7 @@ javascript:(function(){
       [/^(名前|氏名)\s*[：:]\s*(.+)/, 'name'],
       [/^(ふりがな|フリガナ)\s*[：:]\s*(.+)/, 'kana'],
       [/^性別\s*[：:]\s*(.+)/, 'gender'],
+      [/^(最終学歴|学歴)\s*[：:]\s*(.+)/, 'education'],
       [/^(電話番号|TEL|Tel)\s*[：:]\s*([\d\-\s]+)/, 'phone'],
       [/^(アドレス|メール|メールアドレス)\s*[：:]\s*([\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,})/, 'email'],
       [/^(所在地|住所|居住地)\s*[：:]\s*(.+)/, 'area'],
@@ -133,9 +134,10 @@ javascript:(function(){
         }
       }
     }
-    // 生年月日 → 年齢
+    // 生年月日 → 保存用に正規化 + 年齢を自動算出
     var birthM = text.match(/生年月日\s*[：:]\s*(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
     if (birthM) {
+      result.birthDate = birthM[1] + '-' + ('0'+birthM[2]).slice(-2) + '-' + ('0'+birthM[3]).slice(-2);
       var today = new Date();
       var age = today.getFullYear() - parseInt(birthM[1]);
       var md = (today.getMonth()+1) - parseInt(birthM[2]);
@@ -151,6 +153,13 @@ javascript:(function(){
   // ============================================================
   // React/NextData から正規化
   // ============================================================
+  function normBirthDate(str) {
+    if (!str) return '';
+    var m = String(str).match(/(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
+    if (!m) return '';
+    return m[1] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[3]).slice(-2);
+  }
+
   function normalizeReactData(rec) {
     var memo = rec.hearingMemo || rec.memo || rec.note || rec.comment || rec['ヒアリングメモ'] || '';
     var parsed = parseMemoText(memo);
@@ -160,6 +169,8 @@ javascript:(function(){
       phone:      (rec.phone || rec.phoneNumber || rec.tel || parsed.phone || '').replace(/[\s\-]/g,''),
       email:      (rec.email || rec.mailAddress || parsed.email || '').toLowerCase(),
       age:        parsed.age || String(rec.age || ''),
+      birthDate:  parsed.birthDate || normBirthDate(rec.birthDate || rec.birthday || ''),
+      education:  parsed.education || rec.education || rec.finalEducation || '',
       gender:     parsed.gender || rec.gender || '',
       area:       parsed.area || '',
       company:    parsed.company || '',
@@ -211,6 +222,7 @@ javascript:(function(){
   // ============================================================
   var LABELS = {
     name:'氏名', kana:'フリガナ', gender:'性別', age:'年齢',
+    birthDate:'生年月日', education:'最終学歴',
     phone:'電話番号', email:'メール', area:'居住地',
     company:'現職企業', job:'現職職種',
     salary:'現在年収(万)', hopeJob:'希望職種',

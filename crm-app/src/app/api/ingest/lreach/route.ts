@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { calcAge, normalizeBirthDate } from '@/lib/utils'
 
-const UPDATABLE_FIELDS = ['kana','phone','email','age','gender','area','company','job',
+const UPDATABLE_FIELDS = ['kana','phone','email','age','birthDate','education','gender','area','company','job',
                           'salary','hopeJob','hopeArea','hopeSalary','timing','foresmaId'] as const
 
 export async function POST(req: NextRequest) {
@@ -23,6 +24,9 @@ export async function POST(req: NextRequest) {
 
     const phone = String(rec.phone || '').replace(/[\s\-]/g, '').trim()
     const email = String(rec.email || '').trim().toLowerCase()
+    const birthDate = normalizeBirthDate(String(rec.birthDate || ''))
+    // 年齢は生年月日があれば自動算出を優先（取込時点で常に正確な満年齢になる）
+    const age = calcAge(birthDate) || String(rec.age || '')
 
     // 照合: メール（ユニーク）→ 電話 → 名前
     let existing = null
@@ -45,7 +49,9 @@ export async function POST(req: NextRequest) {
       const incoming: Record<string, string> = {
         kana: rec.kana || '',
         phone, email,
-        age: String(rec.age || ''),
+        age,
+        birthDate,
+        education: rec.education || '',
         gender: rec.gender || '',
         area: rec.area || '',
         company: rec.company || '',
@@ -80,7 +86,9 @@ export async function POST(req: NextRequest) {
         kana: rec.kana || '',
         email: email || '',
         phone: phone || '',
-        age: String(rec.age || ''),
+        age,
+        birthDate,
+        education: rec.education || '',
         gender: rec.gender || '',
         area: rec.area || '',
         company: rec.company || '',

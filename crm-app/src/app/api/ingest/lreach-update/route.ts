@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { calcAge, normalizeBirthDate } from '@/lib/utils'
 
 export async function POST(req: NextRequest) {
   const token = req.headers.get('x-ingest-token') || ''
@@ -34,10 +35,21 @@ export async function POST(req: NextRequest) {
 
   // 更新するフィールドのみ抽出（空文字は上書きしない）
   const updateData: Record<string, string> = {}
-  const ALLOWED = ['name','kana','phone','email','age','gender','area','company','job',
+  const ALLOWED = ['name','kana','phone','email','age','birthDate','education','gender','area','company','job',
                    'salary','hopeJob','hopeArea','hopeSalary','timing']
   for (const key of ALLOWED) {
     if (data[key] && data[key].trim()) updateData[key] = data[key].trim()
+  }
+  // 生年月日を正規化し、年齢は生年月日から自動算出を優先
+  if (updateData.birthDate) {
+    const normalized = normalizeBirthDate(updateData.birthDate)
+    if (normalized) {
+      updateData.birthDate = normalized
+      const age = calcAge(normalized)
+      if (age) updateData.age = age
+    } else {
+      delete updateData.birthDate
+    }
   }
 
   if (customer) {
@@ -52,6 +64,8 @@ export async function POST(req: NextRequest) {
         phone: updateData.phone || '',
         email: updateData.email || '',
         age: updateData.age || '',
+        birthDate: updateData.birthDate || '',
+        education: updateData.education || '',
         gender: updateData.gender || '',
         area: updateData.area || '',
         company: updateData.company || '',

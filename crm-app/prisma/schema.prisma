@@ -18,6 +18,8 @@ model Customer {
   phone        String?
   email        String?
   age          String?
+  birthDate    String?   // 生年月日 (YYYY-MM-DD)。あれば年齢はここから自動算出
+  education    String?   // 最終学歴
   gender       String?
   area         String?
   company      String?

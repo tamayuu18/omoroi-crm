@@ -103,6 +103,9 @@ javascript:(function(){
         timing:       parsed.timing,
         salary:       parsed.salary,
         hopeSalary:   parsed.hopeSalary,
+        age:          parsed.age,
+        birthDate:    parsed.birthDate,
+        education:    parsed.education,
         note:         memo,
         lreachStatus: t(1)
       });
@@ -124,6 +127,8 @@ javascript:(function(){
       email:        email,
       phone:        phone,
       age:          rec.age        || parsed.age         || '',
+      birthDate:    parsed.birthDate || normDate(rec.birthDate || rec.birthday || ''),
+      education:    parsed.education || rec.education || rec.finalEducation || rec['最終学歴'] || '',
       gender:       rec.gender     || parsed.gender      || '',
       sendDate:     normDate(rec.referralDate || rec.createdAt || rec.scheduledAt || rec.interviewDate || ''),
       ca:           rec.staffName  || rec.assignee       || rec['担当者']      || '',
@@ -139,7 +144,7 @@ javascript:(function(){
   // ヒアリングメモのパース（型別正規表現）
   // ============================================================
   function parseMemo(memo) {
-    var r = { salary: '', hopeSalary: '', timing: '', phone: '', email: '', kana: '', age: '', gender: '' };
+    var r = { salary: '', hopeSalary: '', timing: '', phone: '', email: '', kana: '', age: '', birthDate: '', education: '', gender: '' };
     if (!memo) return r;
     // フリガナ: ひらがな・カタカナのみ
     var kanaM = memo.match(/(?:ふりがな|フリガナ|読み)[\s　]*[：:]\s*([぀-ヿ゠･\s　]+?)(?=\s*\S+[：:]|\s*$)/);
@@ -153,15 +158,19 @@ javascript:(function(){
     // 性別: 男性/女性
     var genderM = memo.match(/性別[\s　]*[：:]\s*(男性?|女性?)/);
     if (genderM) r.gender = genderM[1].trim();
-    // 生年月日 → 年齢計算
+    // 生年月日 → 保存用に正規化 + 年齢計算
     var birthM = memo.match(/生年月日[\s　]*[：:]\s*(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
     if (birthM) {
+      r.birthDate = birthM[1] + '-' + ('0'+birthM[2]).slice(-2) + '-' + ('0'+birthM[3]).slice(-2);
       var today = new Date();
       var age = today.getFullYear() - parseInt(birthM[1]);
       var md = today.getMonth() + 1 - parseInt(birthM[2]);
       if (md < 0 || (md === 0 && today.getDate() < parseInt(birthM[3]))) age--;
       r.age = String(age);
     }
+    // 最終学歴
+    var eduM = memo.match(/(?:最終学歴|学歴)[\s　]*[：:]\s*([^\n]{1,50})/);
+    if (eduM) r.education = eduM[1].trim();
     var s  = memo.match(/現[在職]?年収\s*[：:]\s*([\d,，万円]+)/);
     var hs = memo.match(/希望年収\s*[：:]\s*([\d,，万円]+)/);
     var t  = memo.match(/転職時期\s*[：:]\s*([^\n。、　]{1,30})/);
