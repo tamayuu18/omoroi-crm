@@ -1,7 +1,7 @@
 # Notta → 議事録 → CRM（顧客History）自動連携 セットアップ手順
 
 CRMアプリ（omoroi-crm / Next.js + Prisma on Vercel）に **Vercel Cron** を追加し、
-CRM自身が2時間おきにGoogleドライブのNottaフォルダを走査して、
+CRM自身が1日1回GoogleドライブのNottaフォルダを走査して、
 文字起こしから議事録を生成し、対応する顧客の対応履歴（History, type=議事録）に追加します。
 
 Claudeのクラウド環境は外向きHTTPが遮断されているため、CRM側で完結するこの方式（Pull型）を採用します。
@@ -69,8 +69,8 @@ npx prisma generate
 
 `vercel.json` の `crons` を含めてデプロイすると、Vercelがcronを登録します。
 
-- スケジュール `0 0,2,4,6,8,10,12,14 * * *`（UTC）＝ **日本時間 9・11・13・15・17・19・21・23時** に実行。
-- **注意**: 2時間おきのcronは **Vercel Pro以上** が必要です（Hobbyプランは日次1回のみ）。
+- スケジュール `0 0 * * *`（UTC）＝ **日本時間 朝9時** に1日1回実行（Hobbyプランで動作可）。
+- すぐ取り込みたい場合は「6. 動作確認」の curl で手動実行できます。
 
 ## 6. 動作確認
 

@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/notta",
-      "schedule": "0 0,2,4,6,8,10,12,14 * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
