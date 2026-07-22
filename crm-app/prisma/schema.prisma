@@ -169,6 +169,22 @@ model History {
   @@index([customerId])
 }
 
+// Nottaファイルの処理済み管理（二重取込防止）
+model ProcessedFile {
+  id          String   @id @default(cuid())
+  fileId      String   @unique          // Google DriveのファイルID
+  fileName    String
+  status      String                    // added | unmatched | empty | error
+  customerId  String?                   // 紐づいた顧客（addedのとき）
+  personName  String?                   // 抽出した氏名（unmatched調査用）
+  attempts    Int      @default(0)      // 失敗リトライ回数
+  note        String?                   // エラー内容など
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+}
+
 model Yomi {
   id              String    @id @default(cuid())
   customerId      String
