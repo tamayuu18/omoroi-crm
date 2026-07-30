@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { listNottaDocs, exportDocText } from '@/lib/googleDrive'
-import { generateMinutes, matchCustomer } from '@/lib/meetingMinutes'
+import {
+  generateMinutes,
+  guessNameFromFileName,
+  loadCustomerIndex,
+  matchCustomerDetailed,
+} from '@/lib/meetingMinutes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,6 +20,11 @@ export const maxDuration = 300 // 秒
  *
  * Nottaフォルダの未処理Googleドキュメントを走査し、議事録を生成して
  * 対応する顧客の対応履歴（History, type=議事録）に追加します。
+ *
+ * 動作確認用のモード（どちらもDBには一切書き込みません）:
+ *   ?dry=1 … Driveのファイル一覧だけを返す
+ *   ?dry=2 … ファイル名から推定した顧客名と、CRMとの照合結果だけを返す
+ *            （文字起こしの取得もAI生成も行わないので速く、費用もかかりません）
  *
  * 二重登録の防止は、履歴本文の末尾に埋め込む `#src:<fileId>` マーカーで行うため、
  * DBのテーブル追加は不要です。
@@ -34,8 +44,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'NOTTA_FOLDER_ID が未設定です' }, { status: 500 })
   }
 
-  // 動作確認用: ?dry=1 で Drive の見え方だけ確認（DBには書き込まない）
-  const dryRun = req.nextUrl.searchParams.get('dry') === '1'
+  const dry = req.nextUrl.searchParams.get('dry') || ''
 
   let docs
   try {
@@ -44,11 +53,45 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Drive走査に失敗: ${String(e?.message || e)}` }, { status: 500 })
   }
 
-  if (dryRun) {
+  if (dry === '1') {
     return NextResponse.json({
       status: 'dry-run',
       total: docs.length,
       files: docs.map((d) => ({ id: d.id, name: d.name, createdTime: d.createdTime })),
+    })
+  }
+
+  // 照合の下見。ファイル名だけを見て、誰に紐づくかを確認する。
+  if (dry === '2') {
+    const index = await loadCustomerIndex()
+    let ok = 0
+    let ng = 0
+    const files: any[] = []
+    for (const doc of docs) {
+      const guessed = guessNameFromFileName(doc.name)
+      const r = await matchCustomerDetailed(
+        { personName: guessed, minutes: '' },
+        doc.name,
+        index
+      )
+      if (r.customer) ok++
+      else ng++
+      files.push({
+        file: doc.name,
+        推定した顧客名: guessed,
+        matched: !!r.customer,
+        customer: r.customer?.name || '',
+        by: r.by,
+        ...(r.note ? { note: r.note } : {}),
+      })
+    }
+    return NextResponse.json({
+      status: 'dry-run-match',
+      total: docs.length,
+      顧客一覧の件数: index.length,
+      matched: ok,
+      notMatched: ng,
+      files,
     })
   }
 
@@ -64,6 +107,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const index = await loadCustomerIndex()
+
   let added = 0
   let notMatched = 0
   let skipped = 0
@@ -77,6 +122,27 @@ export async function GET(req: NextRequest) {
     }
 
     try {
+      // まずファイル名だけで顧客を特定する。ファイル名に氏名があるのに
+      // 該当者がいない場合は、文字起こしの取得もAI生成も行わない（時間と費用の節約）。
+      const guessed = guessNameFromFileName(doc.name)
+      let customer: { id: string; name: string; ca: string | null } | null = null
+      let by = ''
+      if (guessed) {
+        const pre = await matchCustomerDetailed({ personName: guessed, minutes: '' }, doc.name, index)
+        if (!pre.customer) {
+          notMatched++
+          details.push({
+            file: doc.name,
+            matched: false,
+            推定した顧客名: pre.name,
+            ...(pre.note ? { note: pre.note } : {}),
+          })
+          continue
+        }
+        customer = pre.customer
+        by = pre.by
+      }
+
       const text = await exportDocText(doc.id)
       if (!text.trim()) {
         skipped++
@@ -85,13 +151,23 @@ export async function GET(req: NextRequest) {
       }
 
       const ex = await generateMinutes(doc.name, text)
-      const customer = await matchCustomer(ex, doc.name)
 
+      // ファイル名に氏名が無かった場合（「Google Meetからの新しいノート」など）は、
+      // 本文から拾った氏名・メール・電話で照合する。
       if (!customer) {
-        // 顧客が未登録。履歴は作らず、次回実行時に再挑戦します。
-        notMatched++
-        details.push({ file: doc.name, matched: false, personName: ex.personName })
-        continue
+        const post = await matchCustomerDetailed(ex, doc.name, index)
+        if (!post.customer) {
+          notMatched++
+          details.push({
+            file: doc.name,
+            matched: false,
+            推定した顧客名: post.name,
+            ...(post.note ? { note: post.note } : {}),
+          })
+          continue
+        }
+        customer = post.customer
+        by = post.by
       }
 
       const content = `${ex.minutes}\n\n<!-- #src:${doc.id} -->`
@@ -122,7 +198,7 @@ export async function GET(req: NextRequest) {
 
       done.add(doc.id)
       added++
-      details.push({ file: doc.name, matched: true, customer: customer.name })
+      details.push({ file: doc.name, matched: true, customer: customer.name, by })
     } catch (e: any) {
       errored++
       details.push({ file: doc.name, error: String(e?.message || e).slice(0, 500) })

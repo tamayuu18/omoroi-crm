@@ -14,19 +14,208 @@ export type Extracted = {
 // 使用モデルは環境変数で変更可能。現行のモデルIDに合わせて設定してください。
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5'
 
-/** ファイル名から日付・定型語を除いて氏名候補を推定 */
+/* ------------------------------------------------------------------ *
+ * ファイル名から「顧客（求職者）」の氏名を推定する
+ *
+ * 実際のNottaのファイル名は次のような形です。先頭はCA（担当者）の名前で、
+ * 顧客名はコロンまたはスラッシュのあとに来ます。
+ *
+ *   笠原拓実 面談: 金子萌々様 - 2026-07-25 10:19:35
+ *   新　面談:折田天海さん - 2026-07-23 10:34:26
+ *   岩田/　山岸さん2回目面談 - 2026-07-22 17:24:04
+ *   岩田/廣瀬さん　状況確認面談 - 2026-07-24 13:02:11
+ *   Google Meetからの新しいノート - 2026-07-20 09:00:00   ← 顧客名なし
+ * ------------------------------------------------------------------ */
+
+/** 用件・種別をあらわす語（氏名ではない） */
+const TOPIC_WORDS =
+  /(面談|面接対策|面接|議事録|初回|二次|三次|\d+\s*回目|フォロー(アップ)?|MTG|ミーティング|打ち?合わせ|商談|状況確認|進捗確認|相談|ヒアリング|定例|振り返り|キャリア|オンライン|電話|zoom|meet|notta|録音|文字起こし|新規|再面談|顔合わせ|条件確認|内定|選考)/gi
+
+/** 顧客名を含まないことが確定しているファイル名 */
+const NO_NAME_TITLE =
+  /(Google\s*Meet|新しいノート|無題|Untitled|New\s*Recording|名称未設定)/i
+
+/** ファイル名から顧客（求職者）の氏名候補を推定。取れなければ '' を返す。 */
 export function guessNameFromFileName(fileName: string): string {
-  let s = fileName
-    .replace(/\.[a-zA-Z0-9]+$/, '')                 // 拡張子
-    .replace(/\d{4}[-/年.]?\d{1,2}[-/月.]?\d{1,2}日?/g, ' ') // 日付
-    .replace(/\d{1,2}[:：]\d{2}/g, ' ')             // 時刻
-    .replace(/(面談|議事録|初回|二次|フォロー|MTG|ミーティング|商談|Notta|録音|文字起こし|さん|様)/gi, ' ')
-    .replace(/[_\-|｜・／/]+/g, ' ')
-    .replace(/\s+/g, ' ')
+  let s = fileName.replace(/\.[a-zA-Z0-9]+$/, '') // 拡張子
+
+  // 末尾の " - 2026-07-25 10:19:35" を丸ごと落とす
+  s = s.replace(
+    /\s*[-–—ー]\s*\d{4}[-/年.]\d{1,2}[-/月.]\d{1,2}日?(\s+\d{1,2}[:：]\d{2}([:：]\d{2})?)?\s*$/,
+    ' '
+  )
+  // 残った日付・時刻
+  s = s.replace(/\d{4}[-/年.]?\d{1,2}[-/月.]?\d{1,2}日?/g, ' ')
+  s = s.replace(/\d{1,2}[:：]\d{2}([:：]\d{2})?/g, ' ')
+  // 括弧書き（（2回目）など）
+  s = s.replace(/[（(【[｛{].*?[)）】\]｝}]/g, ' ')
+  s = s.replace(/[　\s]+/g, ' ').trim()
+
+  if (!s) return ''
+  if (NO_NAME_TITLE.test(s)) return ''
+
+  // 顧客名は「コロンのあと」→ 無ければ「スラッシュのあと」に来る
+  let seg = s
+  const colon = Math.max(seg.lastIndexOf(':'), seg.lastIndexOf('：'))
+  if (colon >= 0 && seg.slice(colon + 1).trim()) {
+    seg = seg.slice(colon + 1)
+  } else {
+    const slash = Math.max(seg.lastIndexOf('/'), seg.lastIndexOf('／'))
+    if (slash >= 0 && seg.slice(slash + 1).trim()) seg = seg.slice(slash + 1)
+  }
+  seg = seg.trim()
+
+  // 敬称が付いていれば、その手前までが氏名（例: 山岸さん2回目面談 → 山岸）
+  const hon = seg.search(/(様|さん|氏|くん|君|ちゃん)/)
+  if (hon > 0) {
+    seg = seg.slice(0, hon)
+  } else {
+    // 敬称が無い場合は用件語を除去（例: 金子萌々 面談 → 金子萌々）
+    seg = seg.replace(TOPIC_WORDS, ' ')
+  }
+
+  // 記号を空白に。氏名の中の空白（例: 山口 結衣）は残す。
+  seg = seg
+    .replace(/[_\-–—|｜・､、,。.／/:：*＊+＋~〜#＃"'`]+/g, ' ')
+    .replace(/[　\s]+/g, ' ')
     .trim()
-  // 残った最初のトークンを氏名候補とする
-  return s.split(' ')[0] || s
+
+  // 数字だけ／英数字だけのトークンは氏名ではないので落とす
+  seg = seg
+    .split(' ')
+    .filter((t) => t && !/^[0-9a-zA-Z]+$/.test(t))
+    .join(' ')
+    .trim()
+
+  return seg
 }
+
+/* ------------------------------------------------------------------ *
+ * 顧客照合
+ * ------------------------------------------------------------------ */
+
+export type CustomerLite = { id: string; name: string; ca: string | null }
+type IndexedCustomer = CustomerLite & {
+  email: string | null
+  phone: string | null
+  norm: string
+}
+
+/** 空白・記号を取り除いた比較用の文字列 */
+function normName(s: string): string {
+  return (s || '')
+    .replace(/[　\s]+/g, '')
+    .replace(/[・･.,、。‐\-−ー―–—]/g, '')
+    .toLowerCase()
+}
+
+function normPhone(s: string): string {
+  return (s || '').replace(/[^0-9]/g, '')
+}
+
+/** 顧客一覧を1回だけ読み込み、照合用のインデックスを作る */
+export async function loadCustomerIndex(): Promise<IndexedCustomer[]> {
+  const rows = await prisma.customer.findMany({
+    select: { id: true, name: true, ca: true, email: true, phone: true },
+  })
+  return rows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    ca: r.ca ?? null,
+    email: r.email ?? null,
+    phone: r.phone ?? null,
+    norm: normName(r.name),
+  }))
+}
+
+export type MatchResult = {
+  customer: CustomerLite | null
+  /** 照合に使った手がかり */
+  by: 'email' | 'phone' | 'name' | 'name-prefix' | 'none'
+  /** 使用した氏名候補 */
+  name: string
+  /** 未照合・あいまいなときの理由 */
+  note?: string
+}
+
+/**
+ * 抽出結果とファイル名から既存のCustomerを照合する。
+ * 優先順位は メール > 電話 > 氏名（完全一致）> 氏名（姓のみの前方一致）。
+ *
+ * 姓のみの前方一致は、候補が1人に絞れたときだけ採用します。
+ * 同姓が複数いる場合は誤登録を避けるため未照合として報告します。
+ */
+export async function matchCustomerDetailed(
+  ex: Extracted,
+  fileName: string,
+  index?: IndexedCustomer[]
+): Promise<MatchResult> {
+  const list = index ?? (await loadCustomerIndex())
+
+  const email = (ex.email || '').trim().toLowerCase()
+  const phone = normPhone(ex.phone || '')
+
+  // ファイル名から取れた氏名を最優先。取れなければLLMが本文から拾った氏名。
+  const fromFile = guessNameFromFileName(fileName)
+  const fromBody = (ex.personName || '').trim()
+  const name = fromFile || fromBody
+  const pick = (c: IndexedCustomer): CustomerLite => ({ id: c.id, name: c.name, ca: c.ca })
+
+  if (email) {
+    const hit = list.find((c) => (c.email || '').trim().toLowerCase() === email)
+    if (hit) return { customer: pick(hit), by: 'email', name }
+  }
+
+  if (phone.length >= 9) {
+    const hit = list.find((c) => {
+      const p = normPhone(c.phone || '')
+      return p.length >= 9 && p === phone
+    })
+    if (hit) return { customer: pick(hit), by: 'phone', name }
+  }
+
+  for (const cand of [name, fromBody].filter(Boolean)) {
+    const n = normName(cand)
+    if (n.length < 2) continue
+
+    const exact = list.filter((c) => c.norm === n)
+    if (exact.length === 1) return { customer: pick(exact[0]), by: 'name', name: cand }
+    if (exact.length > 1) {
+      return { customer: null, by: 'none', name: cand, note: `同名の顧客が${exact.length}件あります` }
+    }
+
+    // 姓だけ拾えたケース（例: 山岸 → 山岸太郎）
+    const partial = list.filter(
+      (c) => c.norm.length >= 2 && (c.norm.startsWith(n) || n.startsWith(c.norm))
+    )
+    if (partial.length === 1) return { customer: pick(partial[0]), by: 'name-prefix', name: cand }
+    if (partial.length > 1) {
+      return {
+        customer: null,
+        by: 'none',
+        name: cand,
+        note: `候補が${partial.length}件（${partial.slice(0, 5).map((c) => c.name).join('・')}）。姓だけでは特定できません`,
+      }
+    }
+  }
+
+  return {
+    customer: null,
+    by: 'none',
+    name,
+    note: name ? 'CRMに該当の顧客が見つかりません' : 'ファイル名から氏名を取得できません',
+  }
+}
+
+/** 後方互換：Customer か null を返す簡易版 */
+export async function matchCustomer(ex: Extracted, fileName: string, index?: IndexedCustomer[]) {
+  const r = await matchCustomerDetailed(ex, fileName, index)
+  return r.customer
+}
+
+/* ------------------------------------------------------------------ *
+ * 議事録生成
+ * ------------------------------------------------------------------ */
 
 function extractJson(text: string): any {
   // ```json ... ``` やそのまま {...} を許容
@@ -65,6 +254,10 @@ export async function generateMinutes(fileName: string, transcript: string): Pro
     '--- 文字起こしここから ---',
     text,
     '--- 文字起こしここまで ---',
+    '',
+    '注意: 面談にはキャリアアドバイザー（自社の担当者）と求職者が参加しています。',
+    'personName には「求職者（お客様）」の氏名を入れてください。アドバイザー側の氏名ではありません。',
+    'ファイル名は「アドバイザー名 面談: 求職者名様」または「アドバイザー名/求職者名さん用件」の形式です。',
     '',
     '次のJSON形式で出力してください（値が不明な項目は空文字 "" にする）:',
     '{',
@@ -111,23 +304,4 @@ export async function generateMinutes(fileName: string, transcript: string): Pro
     nextAction: json.nextAction || '',
     nextDeadline: (json.nextDeadline || '').trim(),
   }
-}
-
-/** 抽出結果とファイル名から、既存のCustomerを照合（email > phone > 氏名の順） */
-export async function matchCustomer(ex: Extracted, fileName: string) {
-  const email = (ex.email || '').trim().toLowerCase()
-  const phone = (ex.phone || '').trim()
-  const name = (ex.personName || '').trim() || guessNameFromFileName(fileName)
-  if (!email && !phone && !name) return null
-
-  return prisma.customer.findFirst({
-    where: {
-      OR: [
-        email ? { email } : undefined,
-        phone ? { phone } : undefined,
-        name ? { name } : undefined,
-      ].filter(Boolean) as any,
-    },
-    select: { id: true, name: true, ca: true },
-  })
 }
