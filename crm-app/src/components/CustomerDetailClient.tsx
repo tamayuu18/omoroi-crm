@@ -6,14 +6,14 @@ import { useRouter } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import {
   Phone, Mail, MapPin, Briefcase, DollarSign, Calendar,
-  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check, Download, Camera
+  ChevronLeft, Edit, Clock, CheckSquare, Users, Trash2, Star, Pencil, X, Check, Download, Camera, GraduationCap
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History, JobProposalWithJob } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, ASSIGNEE_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS } from '@/lib/constants'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { ProposalSection } from '@/components/ProposalSection'
-import { cn } from '@/lib/utils'
+import { cn, calcAge, normalizeBirthDate } from '@/lib/utils'
 
 function fmt(d: Date | string | null | undefined) {
   if (!d) return '—'
@@ -162,6 +162,8 @@ function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
     phone: customer.phone ?? '',
     email: customer.email ?? '',
     age: customer.age ?? '',
+    birthDate: normalizeBirthDate(customer.birthDate),
+    education: customer.education ?? '',
     gender: customer.gender ?? '',
     area: customer.area ?? '',
     company: customer.company ?? '',
@@ -209,7 +211,21 @@ function EditInfoModal({ customer, onClose, onUpdate }: ModalProps) {
           <Row label="フリガナ"><input value={form.kana} onChange={f('kana')} className={inp} /></Row>
           <Row label="電話番号"><input value={form.phone} onChange={f('phone')} className={inp} /></Row>
           <Row label="メールアドレス"><input type="email" value={form.email} onChange={f('email')} className={inp} /></Row>
-          <Row label="年齢"><input value={form.age} onChange={f('age')} placeholder="例: 28" className={inp} /></Row>
+          <Row label="生年月日">
+            <input type="date" value={form.birthDate}
+              onChange={e => {
+                const birthDate = e.target.value
+                setForm(prev => ({ ...prev, birthDate, age: calcAge(birthDate) || prev.age }))
+              }}
+              className={inp} />
+          </Row>
+          <Row label="年齢">
+            <input value={form.age} onChange={f('age')} placeholder="例: 28" className={inp} />
+            {form.birthDate && calcAge(form.birthDate) && (
+              <p className="text-[11px] text-gray-400 mt-1">生年月日から自動計算: {calcAge(form.birthDate)}歳</p>
+            )}
+          </Row>
+          <Row label="最終学歴"><input value={form.education} onChange={f('education')} placeholder="例: ○○大学 △△学部 卒" className={inp} /></Row>
           <Row label="性別">
             <select value={form.gender} onChange={f('gender')} className={inp}>
               <option value="">— 選択 —</option>
@@ -277,6 +293,8 @@ function parseLreachText(text: string): Record<string, string> {
     [/^(名前|氏名)\s*[：:]\s*(.+)/, 'name'],
     [/^(ふりがな|フリガナ)\s*[：:]\s*(.+)/, 'kana'],
     [/^性別\s*[：:]\s*(.+)/, 'gender'],
+    [/^生年月日\s*[：:]\s*(.+)/, 'birthDate'],
+    [/^(最終学歴|学歴)\s*[：:]\s*(.+)/, 'education'],
     [/^(電話番号|TEL|Tel)\s*[：:]\s*(.+)/, 'phone'],
     [/^(アドレス|メール|メールアドレス|email)\s*[：:]\s*(.+)/i, 'email'],
     [/^(所在地|住所|居住地)\s*[：:]\s*(.+)/, 'area'],
@@ -302,11 +320,23 @@ function parseLreachText(text: string): Record<string, string> {
   // 年収の「万円」「万」を除去して数値のみに
   if (result.salary) result.salary = result.salary.replace(/万円?/, '').trim()
   if (result.hopeSalary) result.hopeSalary = result.hopeSalary.replace(/万円?/, '').trim()
+  // 生年月日を正規化し、年齢を自動算出
+  if (result.birthDate) {
+    const normalized = normalizeBirthDate(result.birthDate)
+    if (normalized) {
+      result.birthDate = normalized
+      const age = calcAge(normalized)
+      if (age) result.age = age
+    } else {
+      delete result.birthDate
+    }
+  }
   return result
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  name: '氏名', kana: 'フリガナ', gender: '性別', phone: '電話番号', email: 'メール',
+  name: '氏名', kana: 'フリガナ', gender: '性別', birthDate: '生年月日', age: '年齢',
+  education: '最終学歴', phone: '電話番号', email: 'メール',
   area: '居住地', hopeArea: '希望勤務地', job: '現職職種', company: '現職企業',
   salary: '現在年収（万円）', hopeSalary: '希望年収（万円）', hopeJob: '希望職種', timing: '転職希望時期',
 }
@@ -1095,7 +1125,9 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
           </div>
           <InfoRow icon={<Phone size={14} />} label="電話" value={customer.phone} />
           <InfoRow icon={<Mail size={14} />} label="メール" value={customer.email} />
-          <InfoRow icon={<Users size={14} />} label="年齢・性別" value={[customer.age && `${customer.age}歳`, customer.gender].filter(Boolean).join(' / ')} />
+          <InfoRow icon={<Users size={14} />} label="年齢・性別" value={[(calcAge(customer.birthDate) || customer.age) && `${calcAge(customer.birthDate) || customer.age}歳`, customer.gender].filter(Boolean).join(' / ')} />
+          <InfoRow icon={<Calendar size={14} />} label="生年月日" value={customer.birthDate} />
+          <InfoRow icon={<GraduationCap size={14} />} label="最終学歴" value={customer.education} />
           <InfoRow icon={<MapPin size={14} />} label="居住地" value={customer.area} />
           <InfoRow icon={<Briefcase size={14} />} label="現職企業" value={customer.company} />
           <InfoRow icon={<Briefcase size={14} />} label="現職職種" value={customer.job} />
