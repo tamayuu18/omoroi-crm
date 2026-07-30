@@ -89,10 +89,12 @@ function StatusChangeModal({ customer, onClose, onUpdate }: ModalProps) {
 
 // ========== Yomi Modal ==========
 function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
-  const c = customer as Customer & { expectedRevenue?: string | null; feeRate?: string | null }
+  const c = customer as Customer & { expectedRevenue?: string | null; feeRate?: string | null; fixedFee?: string | null }
   const [yomiRank, setYomiRank] = useState(c.yomiRank ?? '')
   const [expectedRevenue, setExpectedRevenue] = useState(c.expectedRevenue ?? '')
   const [feeRate, setFeeRate] = useState(c.feeRate ?? '')
+  const [fixedFee, setFixedFee] = useState(c.fixedFee ?? '')
+  const [feeType, setFeeType] = useState<'rate' | 'fixed'>(c.fixedFee ? 'fixed' : 'rate')
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit() {
@@ -103,8 +105,9 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           yomiRank: yomiRank || null,
-          expectedRevenue: expectedRevenue || null,
-          feeRate: feeRate || null,
+          expectedRevenue: feeType === 'rate' ? (expectedRevenue || null) : null,
+          feeRate: feeType === 'rate' ? (feeRate || null) : null,
+          fixedFee: feeType === 'fixed' ? (fixedFee || null) : null,
         }),
       })
       onUpdate()
@@ -132,15 +135,37 @@ function YomiModal({ customer, onClose, onUpdate }: ModalProps) {
         </div>
         <div className="space-y-3 mb-6">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">売上予定額（万円）</label>
-            <input type="number" value={expectedRevenue} onChange={e => setExpectedRevenue(e.target.value)}
-              placeholder="例: 500" className={inp} />
+            <label className="block text-xs font-medium text-gray-600 mb-1">報酬タイプ</label>
+            <div className="flex gap-2">
+              {([['rate', 'フィー率（%）'], ['fixed', '固定報酬（万円）']] as const).map(([type, label]) => (
+                <button key={type} onClick={() => setFeeType(type)}
+                  className={cn('flex-1 py-2 rounded-lg text-xs font-medium border-2 transition-colors',
+                    feeType === type ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:border-gray-300')}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">フィー率（%）</label>
-            <input type="number" value={feeRate} onChange={e => setFeeRate(e.target.value)}
-              placeholder="例: 30" className={inp} />
-          </div>
+          {feeType === 'rate' ? (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">売上予定額（万円）</label>
+                <input type="number" value={expectedRevenue} onChange={e => setExpectedRevenue(e.target.value)}
+                  placeholder="例: 500" className={inp} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">フィー率（%）</label>
+                <input type="number" value={feeRate} onChange={e => setFeeRate(e.target.value)}
+                  placeholder="例: 30" className={inp} />
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">固定報酬（万円）</label>
+              <input type="number" value={fixedFee} onChange={e => setFixedFee(e.target.value)}
+                placeholder="例: 100" className={inp} />
+            </div>
+          )}
         </div>
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
@@ -1141,8 +1166,14 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
 
           <h2 className="font-bold text-gray-700 border-b pb-2 pt-2">ヨミ情報</h2>
           <InfoRow icon={<Star size={14} />} label="ヨミランク" value={customer.yomiRank} />
-          <InfoRow icon={<DollarSign size={14} />} label="売上予定額" value={(customer as any).expectedRevenue && `${(customer as any).expectedRevenue}万円`} />
-          <InfoRow icon={<DollarSign size={14} />} label="フィー率" value={(customer as any).feeRate && `${(customer as any).feeRate}%`} />
+          {(customer as any).fixedFee ? (
+            <InfoRow icon={<DollarSign size={14} />} label="固定報酬" value={`${(customer as any).fixedFee}万円`} />
+          ) : (
+            <>
+              <InfoRow icon={<DollarSign size={14} />} label="売上予定額" value={(customer as any).expectedRevenue && `${(customer as any).expectedRevenue}万円`} />
+              <InfoRow icon={<DollarSign size={14} />} label="フィー率" value={(customer as any).feeRate && `${(customer as any).feeRate}%`} />
+            </>
+          )}
 
           <h2 className="font-bold text-gray-700 border-b pb-2 pt-2">その他</h2>
           <InfoRow icon={<Calendar size={14} />} label="流入元" value={customer.inflow} />

@@ -10,7 +10,7 @@ import { statusColors } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
 
-type RevenueBreakdown = { rank: string; color: string; revenue: number; totalRev: number; totalFee: number | null; count: number }
+type RevenueBreakdown = { rank: string; color: string; revenue: number; totalRev: number; totalFee: number | null; isFixed: boolean; count: number }
 
 function RevenueTooltip({ total, breakdown }: { total: number; breakdown: RevenueBreakdown[] }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -44,9 +44,11 @@ function RevenueTooltip({ total, breakdown }: { total: number; breakdown: Revenu
             <div key={r.rank} className="flex items-center gap-2 py-0.5">
               <span className={cn('px-1.5 py-0.5 rounded text-xs font-bold shrink-0', r.color)}>{r.rank}</span>
               <span className="text-gray-300 flex-1 text-right">
-                {r.totalFee !== null
-                  ? `${r.totalRev}万 × ${r.totalFee}% = ${Math.round(r.revenue * 10) / 10}万円`
-                  : `${Math.round(r.revenue * 10) / 10}万円`}
+                {r.isFixed
+                  ? `固定 ${Math.round(r.revenue * 10) / 10}万円`
+                  : r.totalFee !== null
+                    ? `${r.totalRev}万 × ${r.totalFee}% = ${Math.round(r.revenue * 10) / 10}万円`
+                    : `${Math.round(r.revenue * 10) / 10}万円`}
               </span>
             </div>
           ))}
@@ -153,7 +155,7 @@ export function DashboardClient() {
   const caRows = Array.from(caMap.entries()).sort((a, b) => b[1] - a[1])
 
   // ========== 月別ヨミ表 ==========
-  type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null; expectedRevenue?: string | null; feeRate?: string | null }
+  type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null; expectedRevenue?: string | null; feeRate?: string | null; fixedFee?: string | null }
   // expectedCloseMonth または yomiRank があれば対象
   const yomiCustomers = (filtered as YomiCustomer[]).filter(c => (c.expectedCloseMonth || c.yomiRank) && c.status !== '失注')
 
@@ -192,23 +194,30 @@ export function DashboardClient() {
     return yomiCustomers.filter(c => matchMonth(c, month))
   }
 
+  // 固定報酬が入っていればその額、なければ売上予定額×フィー率でヨミ金額を算出
+  function yomiAmount(c: YomiCustomer) {
+    const fixed = parseFloat(c.fixedFee ?? '0') || 0
+    if (fixed > 0) return fixed
+    const rev = parseFloat(c.expectedRevenue ?? '0') || 0
+    const fee = parseFloat(c.feeRate ?? '0') || 0
+    return rev * fee / 100
+  }
+
   function getMonthRevenue(month: string) {
     const breakdown = YOMI_RANKS.map(r => {
       const customers = yomiCustomers.filter(c =>
         matchMonth(c, month) &&
         (r.rank === '未設定' ? !c.yomiRank : c.yomiRank === r.rank) &&
-        (parseFloat(c.expectedRevenue ?? '0') > 0 || parseFloat(c.feeRate ?? '0') > 0)
+        (parseFloat(c.expectedRevenue ?? '0') > 0 || parseFloat(c.feeRate ?? '0') > 0 || parseFloat(c.fixedFee ?? '0') > 0)
       )
-      const revenue = customers.reduce((sum, c) => {
-        const rev = parseFloat(c.expectedRevenue ?? '0') || 0
-        const fee = parseFloat(c.feeRate ?? '0') || 0
-        return sum + rev * fee / 100
-      }, 0)
+      const revenue = customers.reduce((sum, c) => sum + yomiAmount(c), 0)
       const totalRev = customers.reduce((sum, c) => sum + (parseFloat(c.expectedRevenue ?? '0') || 0), 0)
-      const totalFee = customers.length === 1
-        ? parseFloat(customers[0].feeRate ?? '0') || 0
+      const single = customers.length === 1 ? customers[0] : null
+      const isFixed = single ? (parseFloat(single.fixedFee ?? '0') || 0) > 0 : false
+      const totalFee = single && !isFixed
+        ? parseFloat(single.feeRate ?? '0') || 0
         : null
-      return { rank: r.rank, color: r.color, revenue, totalRev, totalFee, count: customers.length }
+      return { rank: r.rank, color: r.color, revenue, totalRev, totalFee, isFixed, count: customers.length }
     }).filter(r => r.revenue > 0 || r.totalRev > 0)
 
     const total = breakdown.reduce((s, r) => s + r.revenue, 0)
