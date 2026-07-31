@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { listNottaDocs, exportDocText } from '@/lib/googleDrive'
 import {
+  extractDocSummary,
   generateMinutes,
   guessNameFromFileName,
   loadCustomerIndex,
@@ -18,8 +19,12 @@ export const maxDuration = 300 // 秒
  * Vercel Cron が Authorization: Bearer <CRON_SECRET> を付けて呼び出します。
  * 手元での動作確認用に ?key=<CRON_SECRET> でも実行できます。
  *
- * Nottaフォルダの未処理Googleドキュメントを走査し、議事録を生成して
- * 対応する顧客の対応履歴（History, type=議事録）に追加します。
+ * Nottaフォルダの未処理Googleドキュメントを走査し、対応する顧客の
+ * 対応履歴（History, type=議事録）に追加します。
+ *
+ * 記録する本文は、ドキュメントに記載されている要約セクション（AI要約）を
+ * そのまま使用します。要約が無いドキュメント（文字起こしのみ）の場合のみ、
+ * 従来どおり文字起こしからAIで議事録を生成します。
  *
  * 動作確認用のモード（どちらもDBには一切書き込みません）:
  *   ?dry=1 … Driveのファイル一覧だけを返す
@@ -150,7 +155,13 @@ export async function GET(req: NextRequest) {
         continue
       }
 
-      const ex = await generateMinutes(doc.name, text)
+      // ドキュメントに要約が記載されていればそれを記録する。
+      // AI生成は氏名・連絡先・次回アクションなどの抽出のために使う。
+      const summary = extractDocSummary(text)
+      const ex = await generateMinutes(doc.name, summary || text, summary ? '要約' : '文字起こし')
+      if (summary) {
+        ex.minutes = summary
+      }
 
       // ファイル名に氏名が無かった場合（「Google Meetからの新しいノート」など）は、
       // 本文から拾った氏名・メール・電話で照合する。
@@ -198,7 +209,13 @@ export async function GET(req: NextRequest) {
 
       done.add(doc.id)
       added++
-      details.push({ file: doc.name, matched: true, customer: customer.name, by })
+      details.push({
+        file: doc.name,
+        matched: true,
+        customer: customer.name,
+        by,
+        source: summary ? '要約' : '文字起こし',
+      })
     } catch (e: any) {
       errored++
       details.push({ file: doc.name, error: String(e?.message || e).slice(0, 500) })
