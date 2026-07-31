@@ -31,6 +31,11 @@ export const maxDuration = 300 // 秒
  *   ?dry=2 … ファイル名から推定した顧客名と、CRMとの照合結果だけを返す
  *            （文字起こしの取得もAI生成も行わないので速く、費用もかかりません）
  *
+ * 過去分の修正モード（以前の実行で文字起こしベースの議事録が記録された
+ * 履歴を、ドキュメント記載の要約で上書きします）:
+ *   ?rewrite=dry … 上書き対象の一覧だけを返す（書き込みなし）
+ *   ?rewrite=1  … 実際に上書きする（要約が無いドキュメントはスキップ）
+ *
  * 二重登録の防止は、履歴本文の末尾に埋め込む `#src:<fileId>` マーカーで行うため、
  * DBのテーブル追加は不要です。
  */
@@ -97,6 +102,78 @@ export async function GET(req: NextRequest) {
       matched: ok,
       notMatched: ng,
       files,
+    })
+  }
+
+  // 過去の実行で文字起こしベースの議事録が記録された履歴を、
+  // ドキュメント記載の要約で上書きする。
+  const rewrite = req.nextUrl.searchParams.get('rewrite') || ''
+  if (rewrite === '1' || rewrite === 'dry') {
+    const apply = rewrite === '1'
+    const nameById = new Map(docs.map((d) => [d.id, d.name]))
+    const histories = await prisma.history.findMany({
+      where: { createdBy: 'Notta自動連携' },
+      select: { id: true, content: true, name: true },
+    })
+
+    let updated = 0
+    let alreadySummary = 0
+    let noSummary = 0
+    let errored = 0
+    const details: any[] = []
+    // 同じドキュメントを2回取得しないよう、抽出した要約をキャッシュする
+    const summaryCache = new Map<string, string>()
+
+    for (const h of histories) {
+      const m = (h.content || '').match(/#src:([A-Za-z0-9_-]+)/)
+      if (!m) continue
+      const fileId = m[1]
+      const file = nameById.get(fileId) || fileId
+
+      try {
+        let summary = summaryCache.get(fileId)
+        if (summary === undefined) {
+          summary = extractDocSummary(await exportDocText(fileId))
+          summaryCache.set(fileId, summary)
+        }
+        if (!summary) {
+          noSummary++
+          details.push({ file, customer: h.name, skipped: 'ドキュメントに要約がありません' })
+          continue
+        }
+
+        // マーカーを除いた現在の本文がすでに要約と同じなら何もしない
+        const current = (h.content || '')
+          .replace(/<!--\s*#src:[A-Za-z0-9_-]+\s*-->/g, '')
+          .trim()
+        if (current === summary) {
+          alreadySummary++
+          details.push({ file, customer: h.name, skipped: 'すでに要約が記録されています' })
+          continue
+        }
+
+        if (apply) {
+          await prisma.history.update({
+            where: { id: h.id },
+            data: { content: `${summary}\n\n<!-- #src:${fileId} -->` },
+          })
+        }
+        updated++
+        details.push({ file, customer: h.name, updated: apply, ...(apply ? {} : { note: 'dryのため未書き込み' }) })
+      } catch (e: any) {
+        errored++
+        details.push({ file, customer: h.name, error: String(e?.message || e).slice(0, 500) })
+      }
+    }
+
+    return NextResponse.json({
+      status: apply ? 'rewrite' : 'rewrite-dry',
+      対象履歴: histories.length,
+      updated,
+      alreadySummary,
+      noSummary,
+      errored,
+      details,
     })
   }
 
