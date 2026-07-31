@@ -91,6 +91,62 @@ export function guessNameFromFileName(fileName: string): string {
 }
 
 /* ------------------------------------------------------------------ *
+ * Nottaドキュメントから要約セクションを取り出す
+ *
+ * Nottaが書き出すGoogleドキュメントは、おおむね次の構成です。
+ *
+ *   （タイトル・日時など）
+ *   AI要約（または 要約／サマリー）
+ *     …要約本文（テンプレートにより 概要／アクションアイテム 等の小見出しを含む）…
+ *   チャプター
+ *     00:00 挨拶 …
+ *   文字起こし
+ *     発言者 1 00:00
+ *     …
+ *
+ * 対応履歴には文字起こしではなく、この要約セクションをそのまま記録します。
+ * ------------------------------------------------------------------ */
+
+/** 要約セクションの見出し */
+const SUMMARY_HEADING = /^(AI\s*要約|要約|サマリー|概要|Summary)\s*[:：]?\s*$/i
+
+/** 要約の終わり（＝文字起こし・チャプターの始まり）を示す見出し */
+const TRANSCRIPT_HEADING =
+  /^(チャプター|文字起こし(記録)?|トランスクリプト|会話記録|全文(文字起こし)?|Chapters?|Transcript(ion)?)\s*[:：]?\s*$/i
+
+/** 「発言者 1 00:00」「00:00 挨拶」のようなタイムスタンプ行 */
+function isTimestampLine(line: string): boolean {
+  const s = line.trim()
+  return (
+    /^\d{1,2}:\d{2}(:\d{2})?(\s|$)/.test(s) ||
+    /^.{1,40}\s\d{1,2}:\d{2}(:\d{2})?$/.test(s)
+  )
+}
+
+/**
+ * ドキュメント本文から、記載されている要約セクションをそのまま抜き出す。
+ * 要約が見つからない（文字起こしのみのドキュメント）場合は '' を返す。
+ */
+export function extractDocSummary(docText: string): string {
+  const lines = docText.split(/\r?\n/)
+  const start = lines.findIndex((l) => SUMMARY_HEADING.test(l.trim()))
+  if (start === -1) return ''
+
+  const body: string[] = []
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    const t = line.trim()
+    if (TRANSCRIPT_HEADING.test(t)) break
+    if (t && isTimestampLine(line)) break
+    body.push(line)
+  }
+
+  const summary = body.join('\n').trim()
+  // 見出しだけで中身が無いケースは「要約なし」として扱う
+  return summary.length >= 20 ? summary : ''
+}
+
+/* ------------------------------------------------------------------ *
  * 顧客照合
  * ------------------------------------------------------------------ */
 
@@ -228,32 +284,37 @@ function extractJson(text: string): any {
 }
 
 /**
- * 文字起こしから議事録と氏名・連絡先を生成。
+ * 面談の本文（文字起こし、またはドキュメント記載の要約）から
+ * 議事録と氏名・連絡先を生成。
  * ANTHROPIC_API_KEY が無い場合は、素の本文を整形したフォールバックを返す。
  */
-export async function generateMinutes(fileName: string, transcript: string): Promise<Extracted> {
+export async function generateMinutes(
+  fileName: string,
+  body: string,
+  sourceKind: '文字起こし' | '要約' = '文字起こし'
+): Promise<Extracted> {
   const apiKey = process.env.ANTHROPIC_API_KEY
-  const text = transcript.slice(0, 40000) // 長すぎる場合は先頭を使用
+  const text = body.slice(0, 40000) // 長すぎる場合は先頭を使用
 
   if (!apiKey) {
     return {
       personName: guessNameFromFileName(fileName),
-      minutes: `## 面談メモ（自動整形なし）\n\n> ANTHROPIC_API_KEY 未設定のため、文字起こしをそのまま記録しています。\n\n**ファイル**: ${fileName}\n\n${text}`,
+      minutes: `## 面談メモ（自動整形なし）\n\n> ANTHROPIC_API_KEY 未設定のため、${sourceKind}をそのまま記録しています。\n\n**ファイル**: ${fileName}\n\n${text}`,
     }
   }
 
   const system = [
     'あなたは人材紹介会社（キャリアアドバイザー）向けの議事録作成アシスタントです。',
-    '面談の文字起こしから、簡潔で実務に使える議事録を作成します。',
+    `面談の${sourceKind}から、簡潔で実務に使える議事録を作成します。`,
     '出力は必ず指定のJSONのみ。前後の説明文やコードフェンスは付けないでください。',
   ].join('\n')
 
   const userPrompt = [
-    `以下はキャリア面談の文字起こしです。ファイル名: ${fileName}`,
+    `以下はキャリア面談の${sourceKind}です。ファイル名: ${fileName}`,
     '',
-    '--- 文字起こしここから ---',
+    `--- ${sourceKind}ここから ---`,
     text,
-    '--- 文字起こしここまで ---',
+    `--- ${sourceKind}ここまで ---`,
     '',
     '注意: 面談にはキャリアアドバイザー（自社の担当者）と求職者が参加しています。',
     'personName には「求職者（お客様）」の氏名を入れてください。アドバイザー側の氏名ではありません。',
