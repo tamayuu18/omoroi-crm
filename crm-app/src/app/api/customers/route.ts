@@ -9,7 +9,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const params = request.nextUrl.searchParams
-    const status = params.get('status') ?? undefined
+    // ステータスはカンマ区切りで複数指定できる（例: status=内定,承諾）
+    const statusParam = params.get('status') ?? ''
+    const statuses = statusParam.split(',').map(s => s.trim()).filter(Boolean)
+    const status = statuses.length > 0 ? statuses : undefined
     const ca = params.get('ca') ?? undefined
     const yomiRank = params.get('yomi') ?? undefined
     const search = params.get('search') ?? undefined

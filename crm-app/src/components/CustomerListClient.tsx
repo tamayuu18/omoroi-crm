@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { format, isAfter, parseISO } from 'date-fns'
-import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check } from 'lucide-react'
+import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check, ChevronDown } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, INFLOW_OPTIONS, PREF_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS } from '@/lib/constants'
@@ -144,6 +144,60 @@ function BulkStatusModal({ count, onApply, onClose }: { count: number; onApply: 
   )
 }
 
+// ========== Status Multi-Select (checkbox dropdown) ==========
+function StatusMultiSelect({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const toggle = (s: string) =>
+    onChange(selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s])
+
+  const label =
+    selected.length === 0 ? 'すべてのステータス'
+    : selected.length === 1 ? selected[0]
+    : `ステータス（${selected.length}件）`
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className={cn(
+          'flex items-center gap-1.5 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white',
+          selected.length > 0 ? 'border-blue-400 text-blue-700' : 'border-gray-200 text-gray-700'
+        )}>
+        {label}
+        <ChevronDown size={14} className={cn('text-gray-400 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          <div className="sticky top-0 bg-white border-b border-gray-100 px-3 py-2 flex items-center justify-between">
+            <span className="text-xs text-gray-500">複数選択できます</span>
+            {selected.length > 0 && (
+              <button type="button" onClick={() => onChange([])}
+                className="text-xs text-blue-600 hover:underline">クリア</button>
+            )}
+          </div>
+          {ALL_STATUSES.map(s => (
+            <label key={s} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-blue-50 cursor-pointer select-none">
+              <input type="checkbox" checked={selected.includes(s)} onChange={() => toggle(s)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+              {s}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ========== Main (inner, uses useSearchParams) ==========
 function CustomerListInner() {
   const searchParams = useSearchParams()
@@ -153,7 +207,9 @@ function CustomerListInner() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('sf') ?? '')
+  const [statusFilter, setStatusFilter] = useState<string[]>(
+    () => (searchParams.get('sf') ?? '').split(',').filter(Boolean)
+  )
   const [caFilter, setCaFilter] = useState(searchParams.get('ca') ?? '')
   const [yomiFilter, setYomiFilter] = useState(searchParams.get('yr') ?? '')
   const [search, setSearch] = useState(searchParams.get('q') ?? '')
@@ -180,7 +236,7 @@ function CustomerListInner() {
   // 状態が変わったらURLに保存
   useEffect(() => {
     const params = new URLSearchParams()
-    if (statusFilter) params.set('sf', statusFilter)
+    if (statusFilter.length > 0) params.set('sf', statusFilter.join(','))
     if (caFilter) params.set('ca', caFilter)
     if (yomiFilter) params.set('yr', yomiFilter)
     if (search) params.set('q', search)
@@ -195,7 +251,7 @@ function CustomerListInner() {
     setError('')
     try {
       const params = new URLSearchParams()
-      if (statusFilter) params.set('status', statusFilter)
+      if (statusFilter.length > 0) params.set('status', statusFilter.join(','))
       if (caFilter) params.set('ca', caFilter)
       if (yomiFilter) params.set('yomi', yomiFilter)
       if (search) params.set('search', search)
@@ -399,11 +455,7 @@ function CustomerListInner() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">すべてのステータス</option>
-          {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <StatusMultiSelect selected={statusFilter} onChange={setStatusFilter} />
         <select value={caFilter} onChange={(e) => setCaFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">すべての担当CA</option>

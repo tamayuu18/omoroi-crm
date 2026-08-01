@@ -11,9 +11,13 @@ import type { KpiRow } from '@/types'
 
 export type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote }
 
-export async function getCustomers(filters?: { status?: string; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string }) {
+export async function getCustomers(filters?: { status?: string | string[]; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string }) {
   const where: any = {}
-  if (filters?.status) where.status = filters.status
+  if (filters?.status) {
+    const statuses = (Array.isArray(filters.status) ? filters.status : [filters.status]).filter(Boolean)
+    if (statuses.length === 1) where.status = statuses[0]
+    else if (statuses.length > 1) where.status = { in: statuses }
+  }
   if (filters?.ca) where.ca = filters.ca
   if (filters?.yomiRank) where.yomiRank = filters.yomiRank
   if (filters?.search) {
