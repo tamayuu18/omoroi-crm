@@ -72,6 +72,14 @@ export async function POST(req: NextRequest) {
             status: '面談予約済み',
           },
         })
+      } else if (customer.status === '面談キャンセル' || customer.status === 'リスケ調整中') {
+        // キャンセルになった求職者の再予約: 旧予約の面談が「予約済」のまま残っていると
+        // 初回面談日（キャンセル以外で最も古い面談日）が古い日付のまま表示されるため、
+        // 残っている旧予約をキャンセルし、担当CAと合わせて初回面談日も新しい予約に更新する
+        await prisma.meeting.updateMany({
+          where: { customerId: customer.id, status: '予約済' },
+          data: { status: 'キャンセル' },
+        })
       }
 
       // 同じ日時の面談が既にあればスキップ（キャンセル済みは再予約とみなし対象外）
@@ -118,10 +126,24 @@ export async function POST(req: NextRequest) {
       const customer = cancelCustomer
 
       if (customer && startDatetime) {
-        await prisma.meeting.updateMany({
+        const cancelled = await prisma.meeting.updateMany({
           where: { customerId: customer.id, date: startDatetime },
           data: { status: 'キャンセル' },
         })
+
+        // 予約済の面談が残っていなければ顧客ステータスも「面談キャンセル」へ更新する
+        // （面談実施後のステータスまで進んでいる顧客は変更しない）
+        if (cancelled.count > 0 && customer.status === '面談予約済み') {
+          const remaining = await prisma.meeting.count({
+            where: { customerId: customer.id, status: '予約済' },
+          })
+          if (remaining === 0) {
+            await prisma.customer.update({
+              where: { id: customer.id },
+              data: { status: '面談キャンセル' },
+            })
+          }
+        }
       }
 
       return NextResponse.json({ status: 'ok', action: 'cancelled' })
