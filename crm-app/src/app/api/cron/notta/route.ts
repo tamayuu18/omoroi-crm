@@ -31,10 +31,12 @@ export const maxDuration = 300 // 秒
  *   ?dry=2 … ファイル名から推定した顧客名と、CRMとの照合結果だけを返す
  *            （文字起こしの取得もAI生成も行わないので速く、費用もかかりません）
  *
- * 過去分の修正モード（以前の実行で文字起こしベースの議事録が記録された
- * 履歴を、ドキュメント記載の要約で上書きします）:
+ * 過去分の修正モード（以前の実行で文字起こしのまま記録された履歴を直します）:
  *   ?rewrite=dry … 上書き対象の一覧だけを返す（書き込みなし）
- *   ?rewrite=1  … 実際に上書きする（要約が無いドキュメントはスキップ）
+ *   ?rewrite=1  … 実際に上書きする
+ * ドキュメントに要約があればそれで上書き。要約が無い場合は、本文が
+ * 文字起こしのまま（## 面談メモ）の履歴に限り、AIで議事録を生成して
+ * 上書きします。整形済みの履歴はそのまま残します。
  *
  * 二重登録の防止は、履歴本文の末尾に埋め込む `#src:<fileId>` マーカーで行うため、
  * DBのテーブル追加は不要です。
@@ -117,12 +119,12 @@ export async function GET(req: NextRequest) {
     })
 
     let updated = 0
-    let alreadySummary = 0
-    let noSummary = 0
+    let alreadyOk = 0
+    let skippedCount = 0
     let errored = 0
     const details: any[] = []
-    // 同じドキュメントを2回取得しないよう、抽出した要約をキャッシュする
-    const summaryCache = new Map<string, string>()
+    // 同じドキュメントを2回取得しないよう、本文をキャッシュする
+    const textCache = new Map<string, string>()
 
     for (const h of histories) {
       const m = (h.content || '').match(/#src:([A-Za-z0-9_-]+)/)
@@ -131,35 +133,58 @@ export async function GET(req: NextRequest) {
       const file = nameById.get(fileId) || fileId
 
       try {
-        let summary = summaryCache.get(fileId)
-        if (summary === undefined) {
-          summary = extractDocSummary(await exportDocText(fileId))
-          summaryCache.set(fileId, summary)
+        let text = textCache.get(fileId)
+        if (text === undefined) {
+          text = await exportDocText(fileId)
+          textCache.set(fileId, text)
         }
-        if (!summary) {
-          noSummary++
-          details.push({ file, customer: h.name, skipped: 'ドキュメントに要約がありません' })
-          continue
-        }
+        const summary = extractDocSummary(text)
 
-        // マーカーを除いた現在の本文がすでに要約と同じなら何もしない
+        // マーカーを除いた現在の本文
         const current = (h.content || '')
           .replace(/<!--\s*#src:[A-Za-z0-9_-]+\s*-->/g, '')
           .trim()
-        if (current === summary) {
-          alreadySummary++
-          details.push({ file, customer: h.name, skipped: 'すでに要約が記録されています' })
+
+        if (summary) {
+          // ドキュメントに要約がある → それをそのまま記録
+          if (current === summary) {
+            alreadyOk++
+            details.push({ file, customer: h.name, skipped: 'すでに要約が記録されています' })
+            continue
+          }
+          if (apply) {
+            await prisma.history.update({
+              where: { id: h.id },
+              data: { content: `${summary}\n\n<!-- #src:${fileId} -->` },
+            })
+          }
+          updated++
+          details.push({ file, customer: h.name, updated: apply, source: '要約' })
           continue
         }
 
+        // ドキュメントに要約が無い場合。本文が文字起こしのまま残っている
+        // 履歴（## 面談メモ で始まる）だけ、AIで議事録を生成して上書きする。
+        const isRawTranscript = /^##\s*面談メモ/.test(current)
+        if (!isRawTranscript) {
+          alreadyOk++
+          details.push({ file, customer: h.name, skipped: 'ドキュメントに要約が無く、本文は整形済みのため変更しません' })
+          continue
+        }
+        if (!process.env.ANTHROPIC_API_KEY) {
+          skippedCount++
+          details.push({ file, customer: h.name, skipped: 'ANTHROPIC_API_KEY が未設定のためAI議事録を生成できません' })
+          continue
+        }
         if (apply) {
+          const ex = await generateMinutes(file, text)
           await prisma.history.update({
             where: { id: h.id },
-            data: { content: `${summary}\n\n<!-- #src:${fileId} -->` },
+            data: { content: `${ex.minutes}\n\n<!-- #src:${fileId} -->` },
           })
         }
         updated++
-        details.push({ file, customer: h.name, updated: apply, ...(apply ? {} : { note: 'dryのため未書き込み' }) })
+        details.push({ file, customer: h.name, updated: apply, source: 'AI生成議事録' })
       } catch (e: any) {
         errored++
         details.push({ file, customer: h.name, error: String(e?.message || e).slice(0, 500) })
@@ -170,8 +195,8 @@ export async function GET(req: NextRequest) {
       status: apply ? 'rewrite' : 'rewrite-dry',
       対象履歴: histories.length,
       updated,
-      alreadySummary,
-      noSummary,
+      alreadyOk,
+      skipped: skippedCount,
       errored,
       details,
     })
