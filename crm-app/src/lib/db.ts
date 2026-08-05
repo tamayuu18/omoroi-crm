@@ -94,6 +94,24 @@ async function syncMeetingHeldStatus(customerId: string, status?: string | null)
   }
 }
 
+/**
+ * 議事録が追加された顧客のステータスを「面談実施済み」に進める。
+ * すでに面談実施後の段階（求人提案中・内定など）まで進んでいる顧客は変更しない。
+ * ステータスを進めた場合は、KPI集計用に直近の面談レコードも「完了」に同期する。
+ */
+export async function markInterviewHeld(customerId: string) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { status: true },
+  })
+  if (!customer || !PRE_INTERVIEW_STATUSES.includes(customer.status)) return
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: { status: '面談実施済み' },
+  })
+  await syncMeetingHeldStatus(customerId, '面談実施済み')
+}
+
 export async function updateCustomer(id: string, data: Partial<Customer>) {
   const customer = await prisma.customer.update({ where: { id }, data })
 

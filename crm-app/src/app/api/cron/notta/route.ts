@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { markInterviewHeld } from '@/lib/db'
 import { listNottaDocs, exportDocText } from '@/lib/googleDrive'
 import {
   extractDocSummary,
@@ -308,6 +309,9 @@ export async function GET(req: NextRequest) {
           ...(ex.nextDeadline ? { nextDeadline: new Date(ex.nextDeadline) } : {}),
         },
       })
+
+      // 議事録が付いた＝面談は実施済み。まだ実施前のステータスなら進める
+      await markInterviewHeld(customer.id)
 
       done.add(doc.id)
       added++

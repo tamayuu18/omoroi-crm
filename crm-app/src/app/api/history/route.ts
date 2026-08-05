@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { addHistory, updateCustomer } from '@/lib/db'
+import { addHistory, markInterviewHeld, updateCustomer } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -31,6 +31,10 @@ export async function POST(request: NextRequest) {
       })
     } else if (body.customerId) {
       await updateCustomer(body.customerId, { lastContact: body.date || new Date() })
+    }
+    // 議事録が付いた＝面談は実施済み。まだ実施前のステータスなら進める
+    if (body.customerId && (body.type === '議事録' || body.type === '面談')) {
+      await markInterviewHeld(body.customerId)
     }
     return Response.json(history, { status: 201 })
   } catch (e) {
