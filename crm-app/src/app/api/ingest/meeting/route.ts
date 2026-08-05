@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { markInterviewHeld } from '@/lib/db'
 
 /**
  * POST /api/ingest/meeting
@@ -138,6 +139,9 @@ export async function POST(req: NextRequest) {
         ...(rec.nextDeadline ? { nextDeadline: new Date(rec.nextDeadline) } : {}),
       },
     })
+
+    // 5) 議事録が付いた＝面談は実施済み。まだ実施前のステータスなら進める
+    await markInterviewHeld(customer.id)
 
     added++
     results.push({ name: customer.name, matched: true })
