@@ -19,7 +19,18 @@ export async function GET(request: NextRequest) {
 
     const sortBy = params.get('sortBy') ?? undefined
     const sortDir = params.get('sortDir') ?? undefined
-    const customers = await getCustomers({ status, ca, yomiRank, search, sortBy, sortDir })
+
+    // page指定時はページネーション形式（{ customers, total, ... }）で返す。
+    // 未指定時は従来どおり配列を返す（ダッシュボード等の後方互換）。
+    const pageParam = params.get('page')
+    const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : undefined
+    const pageSizeParam = parseInt(params.get('pageSize') ?? '', 10)
+    const pageSize = Number.isFinite(pageSizeParam) ? Math.min(Math.max(pageSizeParam, 1), 100) : 30
+
+    const { customers, total } = await getCustomers({ status, ca, yomiRank, search, sortBy, sortDir, page, pageSize })
+    if (page) {
+      return Response.json({ customers, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
+    }
     return Response.json(customers)
   } catch (e) {
     console.error(e)
