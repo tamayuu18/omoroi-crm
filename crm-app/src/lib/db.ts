@@ -11,7 +11,7 @@ import type { KpiRow } from '@/types'
 
 export type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote }
 
-export async function getCustomers(filters?: { status?: string | string[]; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string }) {
+export async function getCustomers(filters?: { status?: string | string[]; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string; page?: number; pageSize?: number }) {
   const where: any = {}
   if (filters?.status) {
     const statuses = (Array.isArray(filters.status) ? filters.status : [filters.status]).filter(Boolean)
@@ -38,16 +38,17 @@ export async function getCustomers(filters?: { status?: string | string[]; ca?: 
     status: { status: dir },
   }
   const orderBy = validSorts[filters?.sortBy ?? ''] ?? { updatedAt: 'desc' }
-  const customers = await prisma.customer.findMany({
-    where,
-    orderBy,
-    include: {
-      meetings: { where: { status: { not: 'キャンセル' } }, orderBy: { date: 'asc' }, take: 1, select: { date: true } },
-      tasks: { where: { status: { not: '完了' } }, select: { id: true }, take: 1 },
-    },
-  })
+  const include = {
+    meetings: { where: { status: { not: 'キャンセル' } }, orderBy: { date: 'asc' as const }, take: 1, select: { date: true } },
+    tasks: { where: { status: { not: '完了' } }, select: { id: true }, take: 1 },
+  }
 
+  const page = filters?.page
+  const pageSize = filters?.pageSize ?? 30
+
+  // 初回面談日ソートはDBで並べ替えできないため全件取得してメモリ上でソート・ページングする
   if (filters?.sortBy === 'firstMeeting') {
+    const customers = await prisma.customer.findMany({ where, orderBy, include })
     const factor = dir === 'asc' ? 1 : -1
     customers.sort((a, b) => {
       const aDate = a.meetings[0]?.date
@@ -58,9 +59,21 @@ export async function getCustomers(filters?: { status?: string | string[]; ca?: 
       if (!bDate) return -1
       return (aDate.getTime() - bDate.getTime()) * factor
     })
+    const total = customers.length
+    if (page) return { customers: customers.slice((page - 1) * pageSize, page * pageSize), total }
+    return { customers, total }
   }
 
-  return customers
+  if (page) {
+    const [total, customers] = await Promise.all([
+      prisma.customer.count({ where }),
+      prisma.customer.findMany({ where, orderBy, include, skip: (page - 1) * pageSize, take: pageSize }),
+    ])
+    return { customers, total }
+  }
+
+  const customers = await prisma.customer.findMany({ where, orderBy, include })
+  return { customers, total: customers.length }
 }
 
 export async function getCustomerById(id: string) {
