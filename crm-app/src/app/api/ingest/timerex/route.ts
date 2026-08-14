@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { PRE_INTERVIEW_STATUSES } from '@/lib/db'
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -8,6 +9,55 @@ function generateId() {
 function getFormValue(form: any[], fieldType: string): string {
   const field = form.find((f: any) => f.field_type === fieldType)
   return field?.value ? String(field.value) : ''
+}
+
+// 氏名の表記ゆれ（スペースの有無・全角半角）を吸収して比較するための正規化
+function normalizeName(name: string): string {
+  return name.replace(/[\s　]+/g, '')
+}
+
+// 電話番号をハイフン等を除いた数字だけに正規化
+function normalizePhone(phone: string): string {
+  return phone.replace(/[^0-9]/g, '')
+}
+
+// 顧客の照合: 固有メール → 電話番号 → 氏名の順で探す。
+// lreach_schedule@foresma.jp のような複数顧客共有のシステムメールでは特定できないため、
+// メールは1顧客だけが持つ場合のみ使う。氏名は「松岡美穂」と「松岡 美穂」のような
+// スペースの表記ゆれで照合漏れしないよう、正規化して比較する。
+async function findCustomerByGuest(guestName: string, guestEmail: string, guestPhone: string) {
+  if (guestEmail) {
+    const emailCount = await prisma.customer.count({ where: { email: guestEmail } })
+    if (emailCount === 1) {
+      return prisma.customer.findFirst({ where: { email: guestEmail } })
+    }
+  }
+
+  const phone = normalizePhone(guestPhone)
+  if (phone) {
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Customer"
+      WHERE regexp_replace(coalesce("phone", ''), '[^0-9]', '', 'g') = ${phone}
+      ORDER BY "registeredAt" DESC
+      LIMIT 1`
+    if (rows.length > 0) {
+      return prisma.customer.findUnique({ where: { id: rows[0].id } })
+    }
+  }
+
+  const name = normalizeName(guestName)
+  if (name) {
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Customer"
+      WHERE replace(replace("name", ' ', ''), '　', '') = ${name}
+      ORDER BY "registeredAt" DESC
+      LIMIT 1`
+    if (rows.length > 0) {
+      return prisma.customer.findUnique({ where: { id: rows[0].id } })
+    }
+  }
+
+  return null
 }
 
 export async function POST(req: NextRequest) {
@@ -29,6 +79,7 @@ export async function POST(req: NextRequest) {
     // Zapierからフラットフィールドで来る場合のフォールバック
     const guestName = getFormValue(form, 'guest_name') || String(body.guest_name || '')
     const guestEmail = (getFormValue(form, 'guest_email') || String(body.guest_email || '')).toLowerCase()
+    const guestPhone = getFormValue(form, 'guest_phone') || getFormValue(form, 'phone_number') || String(body.guest_phone || body.phone || '')
     const rawHostName = body.host_name || body.ca_name || ''
     const caName = hosts[0]?.name ?? (Array.isArray(rawHostName) ? rawHostName[0] : String(rawHostName))
     const startDatetime = body.local_start_datetime ? new Date(body.local_start_datetime) : null
@@ -48,18 +99,7 @@ export async function POST(req: NextRequest) {
         isSharedEmail = emailCount > 1
       }
 
-      let customer = null
-      // システムメールでなければメールで検索、システムメールまたは空なら名前で検索
-      if (guestEmail && !isSharedEmail) {
-        customer = await prisma.customer.findFirst({ where: { email: guestEmail } })
-      }
-      if (!customer && guestName) {
-        // 名前で検索（複数ヒットの場合は最新登録を優先）
-        customer = await prisma.customer.findFirst({
-          where: { name: guestName },
-          orderBy: { registeredAt: 'desc' },
-        })
-      }
+      let customer = await findCustomerByGuest(guestName, guestEmail, guestPhone)
 
       if (!customer) {
         customer = await prisma.customer.create({
@@ -67,17 +107,24 @@ export async function POST(req: NextRequest) {
             id: generateId(),
             name: guestName,
             email: isSharedEmail ? '' : guestEmail,
+            phone: guestPhone || null,
             ca: caName,
             inflow: 'TimeRex',
             status: '面談予約済み',
           },
         })
-      } else if (customer.status === '面談キャンセル' || customer.status === 'リスケ調整中') {
-        // キャンセルになった求職者の再予約: 旧予約の面談が「予約済」のまま残っていると
-        // 初回面談日（キャンセル以外で最も古い面談日）が古い日付のまま表示されるため、
-        // 残っている旧予約をキャンセルし、担当CAと合わせて初回面談日も新しい予約に更新する
+      } else if (PRE_INTERVIEW_STATUSES.includes(customer.status)) {
+        // 初回面談前の求職者に有効な予約は常に1件のはずなので、新しい予約確定が来たら
+        // 別日時で残っている「予約済」の旧面談はキャンセル扱いにする。
+        // キャンセル通知の取りこぼしや、キャンセル通知を伴わない日程変更があっても、
+        // 初回面談日（キャンセル以外で最も古い面談日）が旧予約の日付のまま残らず、
+        // 担当CAと合わせて新しい予約日時に更新される。
         await prisma.meeting.updateMany({
-          where: { customerId: customer.id, status: '予約済' },
+          where: {
+            customerId: customer.id,
+            status: '予約済',
+            ...(startDatetime ? { NOT: { date: startDatetime } } : {}),
+          },
           data: { status: 'キャンセル' },
         })
       }
@@ -112,18 +159,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'ok', action: 'created', customerId: customer.id })
     } else if (status === 2 || status === 3) {
       // キャンセル: 対応する面談をキャンセルに更新
-      let cancelCustomer = null
-      if (guestEmail) {
-        const emailCount = await prisma.customer.count({ where: { email: guestEmail } })
-        if (emailCount === 1) cancelCustomer = await prisma.customer.findFirst({ where: { email: guestEmail } })
-      }
-      if (!cancelCustomer && guestName) {
-        cancelCustomer = await prisma.customer.findFirst({
-          where: { name: guestName },
-          orderBy: { registeredAt: 'desc' },
-        })
-      }
-      const customer = cancelCustomer
+      const customer = await findCustomerByGuest(guestName, guestEmail, guestPhone)
 
       if (customer && startDatetime) {
         const cancelled = await prisma.meeting.updateMany({
