@@ -43,6 +43,13 @@ export const maxDuration = 300 // 秒
  * DBのテーブル追加は不要です。
  */
 export async function GET(req: NextRequest) {
+  // Vercelの実行時間上限（maxDuration=300秒）に達すると504で強制終了され、
+  // レスポンスも返せなくなる。上限の少し手前で安全に打ち切り、
+  // 途中経過をJSONで返す（処理済み分は保存されているので再実行で続きから進む）。
+  const startedAt = Date.now()
+  const timeBudgetMs = Number(process.env.CRON_TIME_BUDGET_MS || 240_000)
+  const timeLeft = () => timeBudgetMs - (Date.now() - startedAt)
+
   const secret = process.env.CRON_SECRET
   if (secret) {
     const auth = req.headers.get('authorization') || ''
@@ -123,6 +130,7 @@ export async function GET(req: NextRequest) {
     let alreadyOk = 0
     let skippedCount = 0
     let errored = 0
+    let timeLimited = false
     const details: any[] = []
     // 同じドキュメントを2回取得しないよう、本文をキャッシュする
     const textCache = new Map<string, string>()
@@ -132,6 +140,11 @@ export async function GET(req: NextRequest) {
       if (!m) continue
       const fileId = m[1]
       const file = nameById.get(fileId) || fileId
+
+      if (timeLeft() < 25_000) {
+        timeLimited = true
+        break
+      }
 
       try {
         let text = textCache.get(fileId)
@@ -193,12 +206,13 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      status: apply ? 'rewrite' : 'rewrite-dry',
+      status: apply ? (timeLimited ? 'rewrite-partial' : 'rewrite') : 'rewrite-dry',
       対象履歴: histories.length,
       updated,
       alreadyOk,
       skipped: skippedCount,
       errored,
+      ...(timeLimited ? { note: '時間制限のため途中で終了しました。再実行すると続きから処理します。' } : {}),
       details,
     })
   }
@@ -223,33 +237,56 @@ export async function GET(req: NextRequest) {
   let errored = 0
   const details: any[] = []
 
+  // 未処理ドキュメントを先に仕分けする（AI・本文取得なしの軽い処理）。
+  //   primary  … ファイル名で顧客が特定できたもの。最優先で記録する。
+  //   deferred … ファイル名に氏名が無いもの（「Google Meetからの新しいノート」等）。
+  //              本文からのAI照合が必要で時間がかかるため、残り時間で処理する。
+  // ファイル名に氏名があるのに該当者がいないものは、ここで未照合として報告のみ。
+  // 以前は作成日順に全件を順番に処理していたため、照合できない古いファイルの
+  // AI処理に時間を使い切り、新しい面談に処理が届かず記録漏れが起きていた。
+  type Target = { doc: (typeof docs)[number]; customer: { id: string; name: string; ca: string | null } | null; by: string }
+  const primary: Target[] = []
+  const deferred: Target[] = []
+
   for (const doc of docs) {
     if (done.has(doc.id)) {
       skipped++
       continue
     }
+    const guessed = guessNameFromFileName(doc.name)
+    if (!guessed) {
+      deferred.push({ doc, customer: null, by: '' })
+      continue
+    }
+    const pre = await matchCustomerDetailed({ personName: guessed, minutes: '' }, doc.name, index)
+    if (!pre.customer) {
+      notMatched++
+      details.push({
+        file: doc.name,
+        matched: false,
+        推定した顧客名: pre.name,
+        ...(pre.note ? { note: pre.note } : {}),
+      })
+      continue
+    }
+    primary.push({ doc, customer: pre.customer, by: pre.by })
+  }
+
+  const targets = [...primary, ...deferred]
+  let processed = 0
+  let timeLimited = false
+
+  for (const t of targets) {
+    if (timeLeft() < 25_000) {
+      timeLimited = true
+      break
+    }
+    const doc = t.doc
+    processed++
 
     try {
-      // まずファイル名だけで顧客を特定する。ファイル名に氏名があるのに
-      // 該当者がいない場合は、文字起こしの取得もAI生成も行わない（時間と費用の節約）。
-      const guessed = guessNameFromFileName(doc.name)
-      let customer: { id: string; name: string; ca: string | null } | null = null
-      let by = ''
-      if (guessed) {
-        const pre = await matchCustomerDetailed({ personName: guessed, minutes: '' }, doc.name, index)
-        if (!pre.customer) {
-          notMatched++
-          details.push({
-            file: doc.name,
-            matched: false,
-            推定した顧客名: pre.name,
-            ...(pre.note ? { note: pre.note } : {}),
-          })
-          continue
-        }
-        customer = pre.customer
-        by = pre.by
-      }
+      let customer = t.customer
+      let by = t.by
 
       const text = await exportDocText(doc.id)
       if (!text.trim()) {
@@ -328,13 +365,27 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    status: 'ok',
+  const remaining = targets.length - processed
+  const summaryJson = {
+    status: timeLimited ? 'partial' : 'ok',
     total: docs.length,
     added,
     notMatched,
     skipped,
     errored,
+    ...(timeLimited
+      ? {
+          残り: remaining,
+          note: `時間制限のため途中で終了しました（未処理 ${remaining} 件）。再実行すると続きから処理します。`,
+        }
+      : {}),
     details,
-  })
+  }
+
+  // Vercelのログで実行結果を確認できるように要点を出力する
+  console.log(
+    `[cron/notta] status=${summaryJson.status} total=${docs.length} added=${added} notMatched=${notMatched} skipped=${skipped} errored=${errored}${timeLimited ? ` remaining=${remaining}` : ''}`
+  )
+
+  return NextResponse.json(summaryJson)
 }
