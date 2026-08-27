@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Plus, Trash2, ExternalLink, Link2, Copy, Check, Calendar } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Plus, Trash2, ExternalLink, Link2, Copy, Check, Calendar, ArrowUp, ArrowDown } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { Job, JobProposalWithJob } from '@/types'
 import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
@@ -16,6 +16,21 @@ function fmtInput(d: Date | string | null | undefined) {
 function fmtDateTime(d: Date | string | null | undefined) {
   if (!d) return ''
   try { return format(typeof d === 'string' ? parseISO(d) : d, 'yyyy/MM/dd HH:mm') } catch { return '' }
+}
+
+// 提案求人のソート項目
+const PROPOSAL_SORT_OPTIONS = [
+  { value: 'proposedAt', label: '提案日' },
+  { value: 'status', label: 'ステータス（選考順）' },
+  { value: 'company', label: '会社名' },
+  { value: 'interviewDate', label: '面接日' },
+] as const
+type ProposalSortKey = typeof PROPOSAL_SORT_OPTIONS[number]['value']
+
+const toTime = (d: Date | string | null | undefined) => {
+  if (!d) return null
+  const t = typeof d === 'string' ? parseISO(d).getTime() : d.getTime()
+  return Number.isNaN(t) ? null : t
 }
 
 const statusColor = (s: string) =>
@@ -43,6 +58,39 @@ export function ProposalSection({
   const [copied, setCopied] = useState(false)
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
   const [addingNote, setAddingNote] = useState<Record<string, boolean>>({})
+  // ソート（デフォルトは提案日の新しい順＝従来の並び）
+  const [sortBy, setSortBy] = useState<ProposalSortKey>('proposedAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const sortedProposals = useMemo(() => {
+    const factor = sortDir === 'asc' ? 1 : -1
+    const statusRank = (s: string) => {
+      const i = PROPOSAL_STATUS_OPTIONS.indexOf(s)
+      return i === -1 ? PROPOSAL_STATUS_OPTIONS.length : i
+    }
+    return [...proposals].sort((a, b) => {
+      switch (sortBy) {
+        case 'status':
+          return (statusRank(a.status) - statusRank(b.status)) * factor
+        case 'company':
+          return a.job.company.localeCompare(b.job.company, 'ja') * factor
+        case 'interviewDate': {
+          const at = toTime(a.interviewDate)
+          const bt = toTime(b.interviewDate)
+          // 面接日未設定は昇順・降順どちらでも末尾に置く
+          if (at === null && bt === null) return 0
+          if (at === null) return 1
+          if (bt === null) return -1
+          return (at - bt) * factor
+        }
+        default: {
+          const at = toTime(a.proposedAt) ?? 0
+          const bt = toTime(b.proposedAt) ?? 0
+          return (at - bt) * factor
+        }
+      }
+    })
+  }, [proposals, sortBy, sortDir])
 
   // 提案の増減時のみ全選択に初期化（ステータス変更では選択を維持）
   const proposalIds = proposals.map(p => p.id).join(',')
@@ -63,9 +111,9 @@ export function ProposalSection({
   const toggleAll = () =>
     setChecked(allChecked ? new Set() : new Set(proposals.map(p => p.id)))
 
-  // 選択した求人を「会社名／求人： URL」形式でクリップボードにコピー
+  // 選択した求人を「会社名／求人： URL」形式でクリップボードにコピー（表示中の並び順）
   async function copySelected() {
-    const text = proposals
+    const text = sortedProposals
       .filter(p => checked.has(p.id))
       .map(p => `${p.job.company}\n求人： ${p.job.sourceUrl ?? ''}`)
       .join('\n\n')
@@ -230,11 +278,25 @@ export function ProposalSection({
         <div className="text-center text-gray-400 text-sm py-8">提案した求人がありません</div>
       ) : (
         <div className="space-y-2">
-          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none px-1">
-            <input type="checkbox" checked={allChecked} onChange={toggleAll} className="cursor-pointer" />
-            すべて選択（コピー対象）
-          </label>
-          {proposals.map(p => (
+          <div className="flex items-center justify-between gap-2 flex-wrap px-1">
+            <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
+              <input type="checkbox" checked={allChecked} onChange={toggleAll} className="cursor-pointer" />
+              すべて選択（コピー対象）
+            </label>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              並び替え
+              <select value={sortBy} onChange={e => setSortBy(e.target.value as ProposalSortKey)}
+                className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 cursor-pointer">
+                {PROPOSAL_SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <button type="button" onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                title={sortDir === 'asc' ? '昇順（クリックで降順に）' : '降順（クリックで昇順に）'}
+                className="flex items-center gap-0.5 border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">
+                {sortDir === 'asc' ? <><ArrowUp size={12} />昇順</> : <><ArrowDown size={12} />降順</>}
+              </button>
+            </div>
+          </div>
+          {sortedProposals.map(p => (
             <div key={p.id} className={cn('border rounded-lg p-3', checked.has(p.id) ? 'border-blue-200 bg-blue-50/30' : 'border-gray-100')}>
               <div className="flex items-start gap-2">
                 <input type="checkbox" checked={checked.has(p.id)} onChange={() => toggleCheck(p.id)}

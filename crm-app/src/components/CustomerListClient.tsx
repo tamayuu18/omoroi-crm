@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { format, isAfter, parseISO } from 'date-fns'
-import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check } from 'lucide-react'
+import { Search, Plus, ArrowUpDown, ArrowUp, ArrowDown, Upload, Trash2, Edit, X, Check, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Customer, CustomerStatus } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, INFLOW_OPTIONS, PREF_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS } from '@/lib/constants'
@@ -144,6 +144,112 @@ function BulkStatusModal({ count, onApply, onClose }: { count: number; onApply: 
   )
 }
 
+// ========== Status Multi-Select (checkbox dropdown) ==========
+function StatusMultiSelect({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const toggle = (s: string) =>
+    onChange(selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s])
+
+  const label =
+    selected.length === 0 ? 'すべてのステータス'
+    : selected.length === 1 ? selected[0]
+    : `ステータス（${selected.length}件）`
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className={cn(
+          'flex items-center gap-1.5 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white',
+          selected.length > 0 ? 'border-blue-400 text-blue-700' : 'border-gray-200 text-gray-700'
+        )}>
+        {label}
+        <ChevronDown size={14} className={cn('text-gray-400 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          <div className="sticky top-0 bg-white border-b border-gray-100 px-3 py-2 flex items-center justify-between">
+            <span className="text-xs text-gray-500">複数選択できます</span>
+            {selected.length > 0 && (
+              <button type="button" onClick={() => onChange([])}
+                className="text-xs text-blue-600 hover:underline">クリア</button>
+            )}
+          </div>
+          {ALL_STATUSES.map(s => (
+            <label key={s} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-blue-50 cursor-pointer select-none">
+              <input type="checkbox" checked={selected.includes(s)} onChange={() => toggle(s)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+              {s}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ========== Pagination ==========
+const PAGE_SIZE = 30
+
+function getPageNumbers(current: number, total: number): (number | '…')[] {
+  if (total <= 9) return Array.from({ length: total }, (_, i) => i + 1)
+  const pages = new Set<number>([1, 2, total - 1, total])
+  for (let p = current - 2; p <= current + 2; p++) {
+    if (p >= 1 && p <= total) pages.add(p)
+  }
+  const sorted = [...pages].sort((a, b) => a - b)
+  const out: (number | '…')[] = []
+  let prev = 0
+  for (const p of sorted) {
+    if (p - prev > 1) out.push('…')
+    out.push(p)
+    prev = p
+  }
+  return out
+}
+
+function Pagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null
+  return (
+    <div className="flex items-center gap-0.5">
+      <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)}
+        aria-label="前のページ"
+        className="w-8 h-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+        <ChevronLeft size={16} />
+      </button>
+      {getPageNumbers(page, totalPages).map((p, i) =>
+        p === '…' ? (
+          <span key={`e${i}`} className="px-1.5 text-gray-400 text-sm select-none">…</span>
+        ) : (
+          <button key={p} type="button" onClick={() => onChange(p)}
+            aria-current={p === page ? 'page' : undefined}
+            className={cn(
+              'min-w-[32px] h-8 px-1.5 rounded-full text-sm transition-colors',
+              p === page ? 'bg-gray-200 font-semibold text-gray-900' : 'text-gray-600 hover:bg-gray-100'
+            )}>
+            {p}
+          </button>
+        )
+      )}
+      <button type="button" disabled={page >= totalPages} onClick={() => onChange(page + 1)}
+        aria-label="次のページ"
+        className="w-8 h-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  )
+}
+
 // ========== Main (inner, uses useSearchParams) ==========
 function CustomerListInner() {
   const searchParams = useSearchParams()
@@ -153,12 +259,17 @@ function CustomerListInner() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('sf') ?? '')
+  const [statusFilter, setStatusFilter] = useState<string[]>(
+    () => (searchParams.get('sf') ?? '').split(',').filter(Boolean)
+  )
   const [caFilter, setCaFilter] = useState(searchParams.get('ca') ?? '')
   const [yomiFilter, setYomiFilter] = useState(searchParams.get('yr') ?? '')
   const [search, setSearch] = useState(searchParams.get('q') ?? '')
   const [sortBy, setSortBy] = useState(searchParams.get('sb') ?? 'updatedAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>((searchParams.get('sd') as 'asc' | 'desc') ?? 'desc')
+  const [page, setPage] = useState(() => Math.max(1, parseInt(searchParams.get('p') ?? '1', 10) || 1))
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
 
   // New customer modal
   const [showModal, setShowModal] = useState(false)
@@ -180,43 +291,59 @@ function CustomerListInner() {
   // 状態が変わったらURLに保存
   useEffect(() => {
     const params = new URLSearchParams()
-    if (statusFilter) params.set('sf', statusFilter)
+    if (statusFilter.length > 0) params.set('sf', statusFilter.join(','))
     if (caFilter) params.set('ca', caFilter)
     if (yomiFilter) params.set('yr', yomiFilter)
     if (search) params.set('q', search)
     if (sortBy !== 'updatedAt') params.set('sb', sortBy)
     if (sortDir !== 'desc') params.set('sd', sortDir)
+    if (page > 1) params.set('p', String(page))
     const qs = params.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, pathname, router])
+  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, page, pathname, router])
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const params = new URLSearchParams()
-      if (statusFilter) params.set('status', statusFilter)
+      if (statusFilter.length > 0) params.set('status', statusFilter.join(','))
       if (caFilter) params.set('ca', caFilter)
       if (yomiFilter) params.set('yomi', yomiFilter)
       if (search) params.set('search', search)
       params.set('sortBy', sortBy)
       params.set('sortDir', sortDir)
+      params.set('page', String(page))
+      params.set('pageSize', String(PAGE_SIZE))
       const res = await fetch(`/api/customers?${params}`)
       if (!res.ok) throw new Error('Failed')
-      setCustomers(await res.json() as Customer[])
+      const data = await res.json() as { customers: Customer[]; total: number; totalPages: number }
+      setCustomers(data.customers)
+      setTotal(data.total)
+      setTotalPages(data.totalPages)
+      // データ減少などで現在ページが範囲外になったら最終ページへ戻す
+      if (data.customers.length === 0 && data.total > 0 && page > data.totalPages) {
+        setPage(data.totalPages)
+      }
       setSelected(new Set())
     } catch {
       setError('顧客データの取得に失敗しました')
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir])
+  }, [statusFilter, caFilter, yomiFilter, search, sortBy, sortDir, page])
 
   useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
   function toggleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortBy(col); setSortDir('desc') }
+    setPage(1)
+  }
+
+  function changePage(p: number) {
+    setPage(p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function SortIcon({ col }: { col: string }) {
@@ -396,20 +523,16 @@ function CustomerListInner() {
         <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" placeholder="氏名・メール・電話で検索" value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
             className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">すべてのステータス</option>
-          {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={caFilter} onChange={(e) => setCaFilter(e.target.value)}
+        <StatusMultiSelect selected={statusFilter} onChange={(next) => { setStatusFilter(next); setPage(1) }} />
+        <select value={caFilter} onChange={(e) => { setCaFilter(e.target.value); setPage(1) }}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">すべての担当CA</option>
           {CA_OPTIONS.map(ca => <option key={ca} value={ca}>{ca}</option>)}
         </select>
-        <select value={yomiFilter} onChange={(e) => setYomiFilter(e.target.value)}
+        <select value={yomiFilter} onChange={(e) => { setYomiFilter(e.target.value); setPage(1) }}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">ヨミランク</option>
           {['S', 'A', 'B', 'C', 'D'].map(r => <option key={r} value={r}>{r}</option>)}
@@ -435,6 +558,23 @@ function CustomerListInner() {
           <button onClick={() => setSelected(new Set())} className="text-white/70 hover:text-white">
             <X size={16} />
           </button>
+        </div>
+      )}
+
+      {/* Results header + pagination */}
+      {!loading && !error && (
+        <div className="bg-white rounded-lg shadow-sm px-4 py-2.5 mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-medium text-gray-700">検索結果一覧</span>
+            <span className="text-2xl font-bold text-[#0070D2]">{total.toLocaleString()}</span>
+            <span className="text-sm text-gray-700">件</span>
+            {total > 0 && (
+              <span className="text-xs text-gray-400">
+                （{((page - 1) * PAGE_SIZE + 1).toLocaleString()}-{((page - 1) * PAGE_SIZE + customers.length).toLocaleString()}件目を表示）
+              </span>
+            )}
+          </div>
+          <Pagination page={page} totalPages={totalPages} onChange={changePage} />
         </div>
       )}
 
@@ -518,7 +658,12 @@ function CustomerListInner() {
           </table>
         )}
         {!loading && !error && customers.length > 0 && (
-          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">{customers.length}件</div>
+          <div className="px-4 py-2 bg-gray-50 border-t flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-gray-500">
+              {total.toLocaleString()}件中 {((page - 1) * PAGE_SIZE + 1).toLocaleString()}-{((page - 1) * PAGE_SIZE + customers.length).toLocaleString()}件目を表示
+            </span>
+            <Pagination page={page} totalPages={totalPages} onChange={changePage} />
+          </div>
         )}
       </div>
 

@@ -11,9 +11,13 @@ import type { KpiRow } from '@/types'
 
 export type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote }
 
-export async function getCustomers(filters?: { status?: string; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string }) {
+export async function getCustomers(filters?: { status?: string | string[]; ca?: string; yomiRank?: string; search?: string; sortBy?: string; sortDir?: string; page?: number; pageSize?: number }) {
   const where: any = {}
-  if (filters?.status) where.status = filters.status
+  if (filters?.status) {
+    const statuses = (Array.isArray(filters.status) ? filters.status : [filters.status]).filter(Boolean)
+    if (statuses.length === 1) where.status = statuses[0]
+    else if (statuses.length > 1) where.status = { in: statuses }
+  }
   if (filters?.ca) where.ca = filters.ca
   if (filters?.yomiRank) where.yomiRank = filters.yomiRank
   if (filters?.search) {
@@ -34,16 +38,17 @@ export async function getCustomers(filters?: { status?: string; ca?: string; yom
     status: { status: dir },
   }
   const orderBy = validSorts[filters?.sortBy ?? ''] ?? { updatedAt: 'desc' }
-  const customers = await prisma.customer.findMany({
-    where,
-    orderBy,
-    include: {
-      meetings: { where: { status: { not: 'キャンセル' } }, orderBy: { date: 'asc' }, take: 1, select: { date: true } },
-      tasks: { where: { status: { not: '完了' } }, select: { id: true }, take: 1 },
-    },
-  })
+  const include = {
+    meetings: { where: { status: { not: 'キャンセル' } }, orderBy: { date: 'asc' as const }, take: 1, select: { date: true } },
+    tasks: { where: { status: { not: '完了' } }, select: { id: true }, take: 1 },
+  }
 
+  const page = filters?.page
+  const pageSize = filters?.pageSize ?? 30
+
+  // 初回面談日ソートはDBで並べ替えできないため全件取得してメモリ上でソート・ページングする
   if (filters?.sortBy === 'firstMeeting') {
+    const customers = await prisma.customer.findMany({ where, orderBy, include })
     const factor = dir === 'asc' ? 1 : -1
     customers.sort((a, b) => {
       const aDate = a.meetings[0]?.date
@@ -54,9 +59,21 @@ export async function getCustomers(filters?: { status?: string; ca?: string; yom
       if (!bDate) return -1
       return (aDate.getTime() - bDate.getTime()) * factor
     })
+    const total = customers.length
+    if (page) return { customers: customers.slice((page - 1) * pageSize, page * pageSize), total }
+    return { customers, total }
   }
 
-  return customers
+  if (page) {
+    const [total, customers] = await Promise.all([
+      prisma.customer.count({ where }),
+      prisma.customer.findMany({ where, orderBy, include, skip: (page - 1) * pageSize, take: pageSize }),
+    ])
+    return { customers, total }
+  }
+
+  const customers = await prisma.customer.findMany({ where, orderBy, include })
+  return { customers, total: customers.length }
 }
 
 export async function getCustomerById(id: string) {
@@ -88,6 +105,24 @@ async function syncMeetingHeldStatus(customerId: string, status?: string | null)
   if (meeting) {
     await prisma.meeting.update({ where: { id: meeting.id }, data: { status: '完了' } })
   }
+}
+
+/**
+ * 議事録が追加された顧客のステータスを「面談実施済み」に進める。
+ * すでに面談実施後の段階（求人提案中・内定など）まで進んでいる顧客は変更しない。
+ * ステータスを進めた場合は、KPI集計用に直近の面談レコードも「完了」に同期する。
+ */
+export async function markInterviewHeld(customerId: string) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { status: true },
+  })
+  if (!customer || !PRE_INTERVIEW_STATUSES.includes(customer.status)) return
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: { status: '面談実施済み' },
+  })
+  await syncMeetingHeldStatus(customerId, '面談実施済み')
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>) {
