@@ -1,8 +1,28 @@
 import { type NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { updateJob, deleteJob } from '@/lib/db'
+import { getJobById, updateJob, deleteJob } from '@/lib/db'
 import { prisma } from '@/lib/prisma'
+
+// 求人1件の全カラム（求人票本文 detail を含む）。編集フォームを開くときだけ取得する。
+// 一覧（/api/jobs）は detail を返さないので、ここで個別に取り直す。
+export async function GET(
+  _req: NextRequest,
+  ctx: RouteContext<'/api/jobs/[id]'>
+) {
+  const session = await getServerSession(authOptions)
+  if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { id } = await ctx.params
+  try {
+    const job = await getJobById(id)
+    if (!job) return Response.json({ error: 'Not found' }, { status: 404 })
+    return Response.json(job)
+  } catch (e) {
+    console.error(e)
+    return Response.json({ error: 'Failed to fetch job' }, { status: 500 })
+  }
+}
 
 export async function PATCH(
   request: NextRequest,

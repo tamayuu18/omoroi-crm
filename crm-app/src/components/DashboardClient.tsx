@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { isAfter, isThisWeek, isToday, format } from 'date-fns'
+import { format, startOfToday, startOfWeek, endOfWeek, addDays } from 'date-fns'
 import { Users, AlertCircle, Calendar, Clock } from 'lucide-react'
-import type { Customer, Task, Meeting } from '@/types'
+import type { DashboardStats, DashboardYomiCustomer } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS } from '@/lib/constants'
 import { statusColors } from '@/components/StatusBadge'
@@ -75,28 +75,34 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
 }
 
 export function DashboardClient() {
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [caFilter, setCaFilter] = useState('')
 
+  // 集計はすべてサーバー（DB）側で行う。以前は顧客・タスク・面談を全件取得して
+  // 画面側で数えていたため、証明写真を含む全顧客データが表示のたびに転送されていた。
   useEffect(() => {
+    let cancelled = false
     async function fetchData() {
-      const [cRes, tRes, mRes] = await Promise.all([
-        fetch('/api/customers'),
-        fetch('/api/tasks'),
-        fetch('/api/meetings'),
-      ])
-      if (cRes.ok) setCustomers(await cRes.json())
-      if (tRes.ok) setTasks(await tRes.json())
-      if (mRes.ok) setMeetings(await mRes.json())
+      setLoading(true)
+      const params = new URLSearchParams()
+      if (caFilter) params.set('ca', caFilter)
+      // 「今週」「今日」の境界はブラウザのタイムゾーン基準で決める
+      const today = startOfToday()
+      params.set('todayStart', today.toISOString())
+      params.set('weekStart', startOfWeek(today, { weekStartsOn: 1 }).toISOString())
+      params.set('weekEnd', addDays(endOfWeek(today, { weekStartsOn: 1 }), 1).toISOString())
+      const res = await fetch(`/api/dashboard?${params}`, { cache: 'no-store' })
+      if (cancelled) return
+      if (res.ok) setStats(await res.json())
       setLoading(false)
     }
     fetchData()
-  }, [])
+    return () => { cancelled = true }
+  }, [caFilter])
 
-  if (loading) {
+  // 初回だけスケルトンを出す。CA切り替え時は前の集計を表示したまま差し替える
+  if (!stats) {
     return (
       <div className="max-w-screen-xl mx-auto px-4 py-6">
         <div className="animate-pulse space-y-4">
@@ -109,55 +115,30 @@ export function DashboardClient() {
     )
   }
 
-  const filtered = caFilter ? customers.filter(c => c.ca === caFilter) : customers
-
   // KPI
-  const totalCustomers = filtered.length
-  const unreachable = filtered.filter(c => c.status === '初回未対応').length
-  const weekMeetings = meetings.filter(m => {
-    if (!m.date) return false
-    if (m.status === 'キャンセル') return false
-    try {
-      const d = new Date(m.date as unknown as string)
-      return isThisWeek(d, { weekStartsOn: 1 }) || isToday(d)
-    } catch { return false }
-  }).length
+  const totalCustomers = stats.totalCustomers
+  const unreachable = stats.unreachable
+  const weekMeetings = stats.weekMeetings
+  const overdueTasks = stats.overdueTasks
 
   // Cancelled meetings in the last 7 days
-  const recentCancelled = meetings.filter(m => {
-    if (m.status !== 'キャンセル') return false
-    if (!m.date) return false
-    try {
-      const d = new Date(m.date as unknown as string)
-      const sevenDaysAgo = new Date()
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-      return d >= sevenDaysAgo
-    } catch { return false }
-  }).sort((a, b) => new Date(b.date as unknown as string).getTime() - new Date(a.date as unknown as string).getTime())
-  const overdueTasks = tasks.filter(t => {
-    if (t.status === '完了' || !t.deadline) return false
-    try {
-      const d = new Date(t.deadline as unknown as string)
-      return isAfter(new Date(), d) && !isToday(d)
-    } catch { return false }
-  }).length
+  const recentCancelled = stats.recentCancelled
 
-  // Status funnel
+  // Status funnel（ALL_STATUSES の順に並べる）
+  const statusCountMap = new Map(stats.statusCounts.map(x => [x.status, x.count]))
   const statusCounts = ALL_STATUSES.map(s => ({
     status: s,
-    count: filtered.filter(c => c.status === s).length,
+    count: statusCountMap.get(s) ?? 0,
   })).filter(x => x.count > 0)
   const maxCount = Math.max(...statusCounts.map(x => x.count), 1)
 
   // CA table
-  const caMap = new Map<string, number>()
-  filtered.forEach(c => { if (c.ca) caMap.set(c.ca, (caMap.get(c.ca) ?? 0) + 1) })
-  const caRows = Array.from(caMap.entries()).sort((a, b) => b[1] - a[1])
+  const caRows = stats.caCounts.map(r => [r.ca, r.count] as [string, number])
 
   // ========== 月別ヨミ表 ==========
-  type YomiCustomer = Customer & { expectedCloseMonth?: string | null; yomiRank?: string | null; expectedRevenue?: string | null; feeRate?: string | null; fixedFee?: string | null }
-  // expectedCloseMonth または yomiRank があれば対象
-  const yomiCustomers = (filtered as YomiCustomer[]).filter(c => (c.expectedCloseMonth || c.yomiRank) && c.status !== '失注')
+  type YomiCustomer = DashboardYomiCustomer
+  // expectedCloseMonth または yomiRank があり、失注以外の顧客（サーバー側で絞り込み済み）
+  const yomiCustomers: YomiCustomer[] = stats.yomiCustomers
 
   const thisMonth = format(new Date(), 'yyyy-MM')
   const futureMonths = Array.from({ length: 6 }, (_, i) => {
@@ -228,8 +209,8 @@ export function DashboardClient() {
     <div className="max-w-screen-xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">ダッシュボード</h1>
-        <select value={caFilter} onChange={e => setCaFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <select value={caFilter} onChange={e => setCaFilter(e.target.value)} disabled={loading}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
           <option value="">全CA</option>
           {CA_OPTIONS.map(ca => <option key={ca} value={ca}>{ca}</option>)}
         </select>
@@ -251,15 +232,15 @@ export function DashboardClient() {
             直近7日間のキャンセル（{recentCancelled.length}件）
           </h2>
           <div className="space-y-2">
-            {recentCancelled.map((m, i) => {
+            {recentCancelled.map((m) => {
               const dateStr = m.date
                 ? (() => { try { return format(new Date(m.date as unknown as string), 'M/d HH:mm') } catch { return String(m.date) } })()
                 : '—'
               return (
-                <div key={i} className="flex items-center gap-3 text-sm bg-white rounded-lg px-3 py-2 shadow-sm">
+                <div key={m.id} className="flex items-center gap-3 text-sm bg-white rounded-lg px-3 py-2 shadow-sm">
                   <span className="text-red-400 shrink-0">{dateStr}</span>
                   <a href={`/customers/${m.customerId}`} className="font-medium text-blue-600 hover:underline">
-                    {customers.find(c => c.id === m.customerId)?.name || m.name || m.customerId}
+                    {m.customerName}
                   </a>
                   {m.ca && <span className="text-gray-400 text-xs">{m.ca}</span>}
                   <span className="ml-auto text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">キャンセル</span>
@@ -331,7 +312,7 @@ export function DashboardClient() {
           <details className="mt-4">
             <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">対象顧客一覧を表示</summary>
             <div className="mt-2 space-y-1">
-              {yomiCustomers.sort((a, b) => (a.expectedCloseMonth ?? '').localeCompare(b.expectedCloseMonth ?? '')).map(c => (
+              {[...yomiCustomers].sort((a, b) => (a.expectedCloseMonth ?? '').localeCompare(b.expectedCloseMonth ?? '')).map(c => (
                 <a key={c.id} href={`/customers/${c.id}`}
                   className="flex items-center gap-3 text-xs px-2 py-1.5 rounded hover:bg-gray-50">
                   <span className="w-16 text-gray-500">{c.expectedCloseMonth?.replace('-', '/')}</span>

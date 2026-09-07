@@ -34,23 +34,44 @@ const GROUP_LABELS = {
   later: { label: 'それ以降', color: 'text-gray-600 border-gray-200 bg-gray-50', badge: 'bg-gray-100 text-gray-600' },
 }
 
+const PAGE_SIZE = 100
+
 export function TasksClient() {
   const [tasks, setTasks] = useState<Task[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [assigneeFilter, setAssigneeFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  // 既定は完了以外（'open'）。完了済みまで含めると古いタスクが大量に返るため明示的に選んだときだけ取得する
+  const [statusFilter, setStatusFilter] = useState('open')
 
-  const fetchTasks = useCallback(async () => {
-    setLoading(true)
+  // 絞り込みはサーバー側で行い、100件ずつ取得する（以前は全タスクを取得して画面側で絞っていた）
+  const fetchTasks = useCallback(async (pageToLoad: number, append: boolean) => {
+    if (append) setLoadingMore(true)
+    else setLoading(true)
     try {
-      const res = await fetch('/api/tasks')
-      if (res.ok) setTasks(await res.json())
+      const params = new URLSearchParams()
+      if (assigneeFilter) params.set('assignee', assigneeFilter)
+      if (statusFilter) params.set('status', statusFilter)
+      params.set('page', String(pageToLoad))
+      params.set('pageSize', String(PAGE_SIZE))
+      const res = await fetch(`/api/tasks?${params}`, { cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json() as { tasks: Task[]; total: number; totalPages: number }
+        setTasks((prev) => append ? [...prev, ...data.tasks] : data.tasks)
+        setTotal(data.total)
+        setTotalPages(data.totalPages)
+        setPage(pageToLoad)
+      }
     } finally {
-      setLoading(false)
+      if (append) setLoadingMore(false)
+      else setLoading(false)
     }
-  }, [])
+  }, [assigneeFilter, statusFilter])
 
-  useEffect(() => { fetchTasks() }, [fetchTasks])
+  useEffect(() => { fetchTasks(1, false) }, [fetchTasks])
 
   async function toggleStatus(task: Task) {
     const newStatus = task.status === '完了' ? '未完了' : '完了'
@@ -62,11 +83,7 @@ export function TasksClient() {
     setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: newStatus } : t))
   }
 
-  const filtered = tasks.filter((t) => {
-    if (assigneeFilter && (t as any).assignee !== assigneeFilter) return false
-    if (statusFilter && t.status !== statusFilter) return false
-    return true
-  })
+  const filtered = tasks
 
   const grouped = {
     overdue: filtered.filter((t) => categorizeTask(t) === 'overdue'),
@@ -96,6 +113,7 @@ export function TasksClient() {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
+          <option value="open">未完了・対応中</option>
           <option value="">すべてのステータス</option>
           <option value="未完了">未完了</option>
           <option value="完了">完了</option>
@@ -175,6 +193,20 @@ export function TasksClient() {
           {filtered.length === 0 && (
             <div className="bg-white rounded-lg p-12 text-center text-gray-400">
               タスクがありません
+            </div>
+          )}
+          {filtered.length > 0 && (
+            <div className="flex items-center justify-center gap-4 text-sm text-gray-500 py-2">
+              <span>{total}件中 {filtered.length}件を表示</span>
+              {page < totalPages && (
+                <button
+                  onClick={() => fetchTasks(page + 1, true)}
+                  disabled={loadingMore}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {loadingMore ? '読み込み中…' : 'さらに表示'}
+                </button>
+              )}
             </div>
           )}
         </div>
