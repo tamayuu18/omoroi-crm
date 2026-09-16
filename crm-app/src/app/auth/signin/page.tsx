@@ -3,6 +3,7 @@
 import { signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
+import { APP_NAME } from '@/lib/constants'
 
 function SignInContent() {
   const params = useSearchParams()
@@ -11,7 +12,7 @@ function SignInContent() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white rounded-xl shadow-md p-8 w-full max-w-sm text-center">
-        <h1 className="text-2xl font-bold text-[#1B2631] mb-2">おもろいCRM</h1>
+        <h1 className="text-2xl font-bold text-[#1B2631] mb-2">{APP_NAME}</h1>
         <p className="text-gray-500 text-sm mb-6">キャリアアドバイザー業務支援システム</p>
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">

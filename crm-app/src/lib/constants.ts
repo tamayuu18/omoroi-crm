@@ -1,6 +1,27 @@
-export const CA_OPTIONS = ['安井琢真', '濱野翔', '大田一輝', '岸田拓巳', '岩田珠優', '笠原拓実', '岸正平', '新彩菜', '小宮拓真', '長谷川璃空', '中野太揮']
+// 環境変数（NEXT_PUBLIC_ 付き。ビルド時に埋め込まれる）で担当者名を差し替えられる。
+// 他社環境・デモ環境では NEXT_PUBLIC_CA_OPTIONS にカンマ区切りで担当CA名を設定する。
+// 未設定時は従来どおりの固定リストを使う。
+function envList(value: string | undefined): string[] {
+  return (value ?? '').split(',').map(s => s.trim()).filter(Boolean)
+}
 
-export const ASSIGNEE_OPTIONS = [...CA_OPTIONS, 'Bo川口', 'Bo大川']
+const DEFAULT_CA_OPTIONS = ['安井琢真', '濱野翔', '大田一輝', '岸田拓巳', '岩田珠優', '笠原拓実', '岸正平', '新彩菜', '小宮拓真', '長谷川璃空', '中野太揮']
+const DEFAULT_ASSIGNEE_EXTRA = ['Bo川口', 'Bo大川']
+
+const ENV_CA_OPTIONS = envList(process.env.NEXT_PUBLIC_CA_OPTIONS)
+// 担当CA以外にタスク担当者として選べる人（アシスタント等）。CA名を環境変数で指定した場合は
+// NEXT_PUBLIC_ASSIGNEE_EXTRA で指定した人だけを追加する（未指定なら追加なし）。
+const ENV_ASSIGNEE_EXTRA = envList(process.env.NEXT_PUBLIC_ASSIGNEE_EXTRA)
+
+export const CA_OPTIONS = ENV_CA_OPTIONS.length > 0 ? ENV_CA_OPTIONS : DEFAULT_CA_OPTIONS
+
+export const ASSIGNEE_OPTIONS = [
+  ...CA_OPTIONS,
+  ...(ENV_CA_OPTIONS.length > 0 ? ENV_ASSIGNEE_EXTRA : DEFAULT_ASSIGNEE_EXTRA),
+]
+
+// 画面に表示するアプリ名。他社環境では NEXT_PUBLIC_APP_NAME で差し替える。
+export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'おもろいCRM'
 
 export const INFLOW_OPTIONS = ['Lreach', 'リファラル', 'その他']
 

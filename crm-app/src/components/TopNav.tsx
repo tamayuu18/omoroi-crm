@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { cn } from '@/lib/utils'
+import { APP_NAME } from '@/lib/constants'
 import { Users, CheckSquare, LayoutDashboard, Briefcase, BarChart3, LogOut } from 'lucide-react'
 
 const navItems = [
@@ -14,7 +15,7 @@ const navItems = [
   { href: '/dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
 ]
 
-export function TopNav() {
+export function TopNav({ demo = false }: { demo?: boolean }) {
   const pathname = usePathname()
   const { data: session } = useSession()
 
@@ -22,8 +23,16 @@ export function TopNav() {
     <nav className="bg-[#1B2631] text-white shadow-lg">
       <div className="max-w-screen-xl mx-auto px-4 flex items-center h-14 gap-6">
         <Link href="/" className="text-lg font-bold tracking-wide text-white mr-4 shrink-0">
-          おもろいCRM
+          {APP_NAME}
         </Link>
+        {demo && (
+          <span
+            className="hidden sm:inline-block shrink-0 rounded bg-amber-400 px-2 py-0.5 text-xs font-bold text-[#1B2631]"
+            title="デモ環境です。表示されているデータはすべて架空のサンプルです。"
+          >
+            デモ版
+          </span>
+        )}
 
         <div className="flex items-center gap-1 flex-1">
           {navItems.map(({ href, label, icon: Icon }) => {
@@ -46,7 +55,7 @@ export function TopNav() {
           })}
         </div>
 
-        {session?.user && (
+        {!demo && session?.user && (
           <div className="flex items-center gap-3 text-sm text-white/80">
             <span className="hidden sm:block">{session.user.name}</span>
             <button

@@ -1,6 +1,5 @@
 import { type NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAppSession } from '@/lib/session'
 import { updateProposal, deleteProposal } from '@/lib/db'
 import { PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
 
@@ -8,7 +7,7 @@ export async function PATCH(
   request: NextRequest,
   ctx: RouteContext<'/api/proposals/[id]'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params
@@ -35,7 +34,7 @@ export async function DELETE(
   _req: NextRequest,
   ctx: RouteContext<'/api/proposals/[id]'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params
