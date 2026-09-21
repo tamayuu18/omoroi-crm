@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 import { calcAge, normalizeBirthDate } from '@/lib/utils'
 
 const UPDATABLE_FIELDS = ['kana','phone','email','age','birthDate','education','gender','area','company','job',
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest) {
         timing: rec.timing || '',
         inflow: 'Lreach',
         foresmaId: rec.foresmaId || '',
-        ca: rec.ca || '',
+        ca: normalizeCa(rec.ca || ''),
         status: '初回未対応',
         note: rec.note || '',
         registeredAt: rec.sendDate ? new Date(rec.sendDate) : new Date(),

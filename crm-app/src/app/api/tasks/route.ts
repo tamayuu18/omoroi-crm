@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getTasks } from '@/lib/db'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -46,8 +47,8 @@ export async function POST(request: NextRequest) {
       data: {
         customerId: body.customerId,
         name: body.name ?? '',
-        ca: body.ca ?? '',
-        assignee: body.assignee ?? '',
+        ca: normalizeCa(body.ca ?? ''),
+        assignee: normalizeCa(body.assignee ?? ''),
         content: body.content,
         deadline: body.deadline ? new Date(body.deadline) : null,
         priority: body.priority ?? '中',

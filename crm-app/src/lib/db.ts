@@ -9,6 +9,13 @@ import {
   PROPOSAL_ACCEPTED_STATUSES,
 } from './constants'
 import type { KpiRow, DashboardStats } from '@/types'
+import { normalizeCa, caWhere } from './ca'
+
+// 担当CA名を持つレコードの作成・更新時に、CA名の表記ゆれ（例: 「岩田珠優（社用）」）を正式名へ寄せる
+function withNormalizedCa<T extends { ca?: string | null }>(data: T): T {
+  if (typeof data.ca === 'string') return { ...data, ca: normalizeCa(data.ca) }
+  return data
+}
 
 export type { Customer, Task, Meeting, History, Job, JobProposal, ProposalNote }
 
@@ -50,7 +57,7 @@ function buildCustomerWhere(filters?: { status?: string | string[]; ca?: string;
     if (statuses.length === 1) where.status = statuses[0]
     else if (statuses.length > 1) where.status = { in: statuses }
   }
-  if (filters?.ca) where.ca = filters.ca
+  if (filters?.ca) where.ca = caWhere(filters.ca)
   if (filters?.yomiRank) where.yomiRank = filters.yomiRank
   if (filters?.search) {
     where.OR = [
@@ -140,7 +147,7 @@ export async function getCustomerPhoto(id: string) {
 }
 
 export async function createCustomer(data: Omit<Customer, 'id' | 'registeredAt' | 'updatedAt'>) {
-  return prisma.customer.create({ data })
+  return prisma.customer.create({ data: withNormalizedCa(data) })
 }
 
 // 面談がまだ「実施済み」とみなせない顧客ステータス（これら以外は面談実施後のステータス）
@@ -182,7 +189,8 @@ export async function markInterviewHeld(customerId: string) {
   await syncMeetingHeldStatus(customerId, '面談実施済み')
 }
 
-export async function updateCustomer(id: string, data: Partial<Customer>) {
+export async function updateCustomer(id: string, rawData: Partial<Customer>) {
+  const data = withNormalizedCa(rawData)
   // 更新結果に写真（base64）を含めない。写真を更新した場合も画面側は送った画像をそのまま表示する
   const customer = await prisma.customer.update({ where: { id }, data, omit: { photoUrl: true } })
 
@@ -208,8 +216,8 @@ export type TaskFilters = {
 function buildTaskWhere(filters?: TaskFilters) {
   const where: Prisma.TaskWhereInput = {}
   if (filters?.customerId) where.customerId = filters.customerId
-  if (filters?.ca) where.ca = filters.ca
-  if (filters?.assignee) where.assignee = filters.assignee
+  if (filters?.ca) where.ca = caWhere(filters.ca)
+  if (filters?.assignee) where.assignee = caWhere(filters.assignee)
   if (filters?.status === 'open') where.status = { not: '完了' }
   else if (filters?.status === 'done') where.status = '完了'
   else if (filters?.status) where.status = filters.status
@@ -234,7 +242,7 @@ export async function getTasks(filters?: TaskFilters): Promise<{ tasks: Task[]; 
 }
 
 export async function updateTask(id: string, data: Partial<Task>) {
-  return prisma.task.update({ where: { id }, data })
+  return prisma.task.update({ where: { id }, data: withNormalizedCa(data) })
 }
 
 // ========== 面談 ==========
@@ -245,11 +253,11 @@ export async function getMeetings(filters?: { customerId?: string }) {
 }
 
 export async function createMeeting(data: Omit<Meeting, 'id' | 'createdAt'>) {
-  return prisma.meeting.create({ data })
+  return prisma.meeting.create({ data: withNormalizedCa(data) })
 }
 
 export async function updateMeeting(id: string, data: Partial<Meeting>) {
-  return prisma.meeting.update({ where: { id }, data })
+  return prisma.meeting.update({ where: { id }, data: withNormalizedCa(data) })
 }
 
 // ========== 対応履歴 ==========
@@ -261,7 +269,7 @@ export async function getHistory(customerId: string) {
 }
 
 export async function addHistory(data: Omit<History, 'id' | 'createdAt'>) {
-  return prisma.history.create({ data })
+  return prisma.history.create({ data: withNormalizedCa({ ...data, createdBy: normalizeCa(data.createdBy) }) })
 }
 
 // ========== 求人マスタ ==========
@@ -331,11 +339,11 @@ export async function getProposals(filters?: { customerId?: string; jobId?: stri
 }
 
 export async function createProposal(data: Omit<JobProposal, 'id' | 'createdAt' | 'updatedAt' | 'proposedAt' | 'decidedAt' | 'interviewDate'> & { proposedAt?: Date }) {
-  return prisma.jobProposal.create({ data, include: PROPOSAL_INCLUDE })
+  return prisma.jobProposal.create({ data: withNormalizedCa(data), include: PROPOSAL_INCLUDE })
 }
 
 export async function updateProposal(id: string, data: Partial<JobProposal>) {
-  return prisma.jobProposal.update({ where: { id }, data, include: PROPOSAL_INCLUDE })
+  return prisma.jobProposal.update({ where: { id }, data: withNormalizedCa(data), include: PROPOSAL_INCLUDE })
 }
 
 export async function deleteProposal(id: string) {
@@ -344,7 +352,7 @@ export async function deleteProposal(id: string) {
 
 // ========== 提案ごとの社内メモ（追記専用） ==========
 export async function addProposalNote(proposalId: string, data: { content: string; createdBy?: string | null }) {
-  return prisma.proposalNote.create({ data: { proposalId, content: data.content, createdBy: data.createdBy ?? null } })
+  return prisma.proposalNote.create({ data: { proposalId, content: data.content, createdBy: normalizeCa(data.createdBy) ?? null } })
 }
 
 // ========== ダッシュボード集計 ==========
@@ -357,7 +365,7 @@ export async function getDashboardStats(params: {
   todayStart: Date
   cancelledSince: Date
 }): Promise<DashboardStats> {
-  const customerWhere: Prisma.CustomerWhereInput = params.ca ? { ca: params.ca } : {}
+  const customerWhere: Prisma.CustomerWhereInput = params.ca ? { ca: caWhere(params.ca) } : {}
 
   const [byStatusCa, weekMeetings, overdueTasks, recentCancelled, yomiRows] = await Promise.all([
     prisma.customer.groupBy({
@@ -404,7 +412,9 @@ export async function getDashboardStats(params: {
     totalCustomers += n
     if (r.status === '初回未対応') unreachable += n
     statusCounts.set(r.status, (statusCounts.get(r.status) ?? 0) + n)
-    if (r.ca) caCounts.set(r.ca, (caCounts.get(r.ca) ?? 0) + n)
+    // 表記ゆれ（「岩田珠優（社用）」など）は正式名に寄せて同じCAとして数える
+    const ca = normalizeCa(r.ca)
+    if (ca) caCounts.set(ca, (caCounts.get(ca) ?? 0) + n)
   }
 
   return {
@@ -420,11 +430,13 @@ export async function getDashboardStats(params: {
       id: m.id,
       date: m.date,
       customerId: m.customerId,
-      ca: m.ca,
+      ca: normalizeCa(m.ca),
       customerName: m.customer?.name || m.name || m.customerId,
     })),
     // 空文字は未設定扱い（従来の画面側の判定に合わせる）
-    yomiCustomers: yomiRows.filter((c) => c.expectedCloseMonth || c.yomiRank),
+    yomiCustomers: yomiRows
+      .filter((c) => c.expectedCloseMonth || c.yomiRank)
+      .map((c) => ({ ...c, ca: normalizeCa(c.ca) })),
   }
 }
 
@@ -452,8 +464,10 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
   // 先に既定CAで行を初期化しておく（クエリが失敗しても必ずCA別カードが出るように）
   const rows = new Map<string, KpiRow>()
   for (const ca of CA_OPTIONS) rows.set(ca, emptyRow(ca))
+  // DB側は生のCA名で GROUP BY しているため、表記ゆれ（「岩田珠優（社用）」など）は
+  // ここで正式名に寄せ、同じCAの行として合算する
   const rowFor = (ca?: string | null) => {
-    const key = ca || '未割当'
+    const key = normalizeCa(ca) || '未割当'
     let r = rows.get(key)
     if (!r) { r = emptyRow(key); rows.set(key, r) }
     return r
@@ -481,8 +495,8 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     `
     for (const r of meetingRows) {
       const row = rowFor(r.ca)
-      row.meetingsSet = r.meetingsSet
-      row.firstMeetings = r.firstMeetings
+      row.meetingsSet += r.meetingsSet
+      row.firstMeetings += r.firstMeetings
     }
   } catch (e) {
     console.error('getKpi: meeting query failed', e)
@@ -515,11 +529,11 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     `
     for (const r of proposalRows) {
       const row = rowFor(r.ca)
-      row.proposals = r.proposals
-      row.selections = r.selections
-      row.interviews = r.interviews
-      row.offers = r.offers
-      row.accepted = r.accepted
+      row.proposals += r.proposals
+      row.selections += r.selections
+      row.interviews += r.interviews
+      row.offers += r.offers
+      row.accepted += r.accepted
     }
   } catch (e) {
     console.error('getKpi: proposal query failed (JobProposalテーブル未作成の可能性)', e)

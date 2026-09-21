@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 import { markInterviewHeld } from '@/lib/db'
 import { listNottaDocs, exportDocText } from '@/lib/googleDrive'
 import {
@@ -326,7 +327,7 @@ export async function GET(req: NextRequest) {
         data: {
           customerId: customer.id,
           name: customer.name,
-          ca: customer.ca || '',
+          ca: normalizeCa(customer.ca || ''),
           date: new Date(),
           type: '議事録',
           result: ex.result || '',
