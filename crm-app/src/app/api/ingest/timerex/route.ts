@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { PRE_INTERVIEW_STATUSES } from '@/lib/db'
+import { normalizeCa } from '@/lib/ca'
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -81,7 +82,8 @@ export async function POST(req: NextRequest) {
     const guestEmail = (getFormValue(form, 'guest_email') || String(body.guest_email || '')).toLowerCase()
     const guestPhone = getFormValue(form, 'guest_phone') || getFormValue(form, 'phone_number') || String(body.guest_phone || body.phone || '')
     const rawHostName = body.host_name || body.ca_name || ''
-    const caName = hosts[0]?.name ?? (Array.isArray(rawHostName) ? rawHostName[0] : String(rawHostName))
+    // ホスト名は「岩田珠優（社用）」のように予約ページのアカウント名で来るので、CAの正式名へ寄せる
+    const caName = normalizeCa(String(hosts[0]?.name ?? (Array.isArray(rawHostName) ? rawHostName[0] : rawHostName) ?? ''))
     const startDatetime = body.local_start_datetime ? new Date(body.local_start_datetime) : null
     const endDatetime = body.local_end_datetime ? new Date(body.local_end_datetime) : null
     const timerexId = String(body.id ?? '')

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Plus, Trash2, ExternalLink, Link2, Copy, Check, Calendar, ArrowUp, ArrowDown } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import type { Job, JobProposalWithJob } from '@/types'
+import type { Job, JobSummary, JobProposalWithJob } from '@/types'
 import { PROPOSAL_STATUS_OPTIONS, PROPOSAL_OFFER_STATUSES } from '@/lib/constants'
 import { JobFormModal } from '@/components/JobFormModal'
 import { cn } from '@/lib/utils'
@@ -48,7 +48,7 @@ export function ProposalSection({
   proposals: JobProposalWithJob[]
   onUpdate: () => void
 }) {
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobs, setJobs] = useState<JobSummary[]>([])
   const [adding, setAdding] = useState(false)
   const [selectedJob, setSelectedJob] = useState('')
   const [saving, setSaving] = useState(false)

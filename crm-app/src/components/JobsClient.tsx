@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Briefcase, Plus, Trash2, Pencil } from 'lucide-react'
-import type { Job } from '@/types'
+import type { Job, JobSummary } from '@/types'
 import { JOB_STATUS_OPTIONS } from '@/lib/constants'
 import { JobFormModal } from '@/components/JobFormModal'
 import { cn } from '@/lib/utils'
@@ -18,7 +18,7 @@ const statusColor: Record<string, string> = {
 
 
 export function JobsClient() {
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -36,7 +36,7 @@ export function JobsClient() {
 
   useEffect(() => { fetchJobs() }, [fetchJobs])
 
-  async function handleDelete(job: Job) {
+  async function handleDelete(job: JobSummary) {
     if (!confirm(`「${job.company} / ${job.title}」を削除しますか？`)) return
     const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' })
     if (!res.ok) {
@@ -48,7 +48,13 @@ export function JobsClient() {
   }
 
   function openNew() { setModalJob(null); setShowModal(true) }
-  function openEdit(j: Job) { setModalJob(j); setShowModal(true) }
+  // 一覧は求人票本文（detail）を含まないので、編集時だけ1件分を取り直す
+  async function openEdit(j: JobSummary) {
+    const res = await fetch(`/api/jobs/${j.id}`, { cache: 'no-store' })
+    if (!res.ok) { alert('求人の取得に失敗しました'); return }
+    setModalJob(await res.json())
+    setShowModal(true)
+  }
 
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6 space-y-4">
