@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import type { Customer, Job } from '@prisma/client'
 import { isDemoMode } from '@/lib/demo'
 import { CA_OPTIONS } from '@/lib/constants'
+import { ensureSchema } from '@/lib/schema'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic'
  *   GET /api/demo/seed          … 顧客が0件のときだけ投入（すでにあれば何もしない）
  *   GET /api/demo/seed?reset=1  … 全テーブルを空にしてから投入し直す（デモのリセット用）
  *
- * 事前に `npm run db:push` などでテーブルを作成しておくこと。
+ * テーブルが無ければ先に作成する（ensureSchema）ので、空のDBに対してそのまま開いてよい。
  */
 
 const DAY = 24 * 60 * 60 * 1000
@@ -73,6 +74,9 @@ export async function GET(req: NextRequest) {
   }
 
   const reset = req.nextUrl.searchParams.get('reset') === '1'
+
+  // 空のDBでも動くよう、先にテーブルを作成しておく（作成済みなら何もしない）
+  await ensureSchema()
 
   if (reset) {
     // 依存関係の順に全削除（Customer/Job の削除で子テーブルはカスケードされる）
