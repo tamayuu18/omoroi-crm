@@ -15,7 +15,10 @@ export async function GET(
   try {
     const customer = await getCustomerById(id)
     if (!customer) return Response.json({ error: 'Not found' }, { status: 404 })
-    return Response.json(customer)
+    // 写真は base64 を同梱せず、キャッシュ可能な画像URLに置き換えて返す
+    const { hasPhoto, ...rest } = customer
+    const photoUrl = hasPhoto ? `/api/customers/${id}/photo?v=${customer.updatedAt.getTime()}` : null
+    return Response.json({ ...rest, photoUrl })
   } catch (e) {
     console.error(e)
     return Response.json({ error: 'Failed to fetch customer' }, { status: 500 })

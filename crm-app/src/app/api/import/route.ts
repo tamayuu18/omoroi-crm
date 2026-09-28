@@ -1,6 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getAppSession } from '@/lib/session'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 
 // CSV ヘッダー名 → フィールド名のマッピング
 const HEADER_MAP: Record<string, string> = {
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
         hopeArea: row.hopeArea ?? '',
         hopeSalary: row.hopeSalary ?? '',
         timing: row.timing ?? '',
-        ca: row.ca ?? '',
+        ca: normalizeCa(row.ca ?? ''),
         inflow: row.inflow ?? '',
         status: row.status ?? '初回未対応',
         yomiRank: row.yomiRank ?? null,

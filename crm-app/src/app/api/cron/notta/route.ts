@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 import { markInterviewHeld } from '@/lib/db'
 import { listNottaDocs, exportDocText } from '@/lib/googleDrive'
 import {
@@ -217,17 +218,16 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // 取り込み済みのファイルIDを、既存履歴のマーカーから収集（1クエリ）
+  // 取り込み済みのファイルIDを、既存履歴のマーカーから収集（1クエリ）。
+  // 議事録本文をすべて取得すると毎日の実行で全議事録が転送されてしまうため、
+  // マーカー部分（#src:<fileId>）だけをDB側で抜き出して受け取る。
   const done = new Set<string>()
-  const past = await prisma.history.findMany({
-    where: { createdBy: 'Notta自動連携' },
-    select: { content: true },
-  })
-  for (const h of past) {
-    for (const m of (h.content || '').matchAll(/#src:([A-Za-z0-9_-]+)/g)) {
-      done.add(m[1])
-    }
-  }
+  const past = await prisma.$queryRaw<{ fileId: string }[]>`
+    SELECT (regexp_matches("content", '#src:([A-Za-z0-9_-]+)', 'g'))[1] AS "fileId"
+    FROM "History"
+    WHERE "createdBy" = 'Notta自動連携' AND "content" LIKE '%#src:%'
+  `
+  for (const h of past) done.add(h.fileId)
 
   const index = await loadCustomerIndex()
 
@@ -327,7 +327,7 @@ export async function GET(req: NextRequest) {
         data: {
           customerId: customer.id,
           name: customer.name,
-          ca: customer.ca || '',
+          ca: normalizeCa(customer.ca || ''),
           date: new Date(),
           type: '議事録',
           result: ex.result || '',

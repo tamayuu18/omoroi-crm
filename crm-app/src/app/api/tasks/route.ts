@@ -3,6 +3,7 @@ import { type NextRequest } from 'next/server'
 import { getAppSession } from '@/lib/session'
 import { getTasks } from '@/lib/db'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 
 export async function GET(request: NextRequest) {
   const session = await getAppSession()
@@ -12,7 +13,21 @@ export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams
     const customerId = params.get('customerId') ?? undefined
     const ca = params.get('ca') ?? undefined
-    const tasks = await getTasks({ customerId, ca })
+    const assignee = params.get('assignee') ?? undefined
+    // status: 'open'（完了以外）/ 'done'（完了）/ ステータス文字列
+    const status = params.get('status') ?? undefined
+
+    // page指定時はページネーション形式（{ tasks, total, ... }）で返す。
+    // 未指定時は従来どおり配列を返す（顧客詳細など customerId 指定の用途）。
+    const pageParam = params.get('page')
+    const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : undefined
+    const pageSizeParam = parseInt(params.get('pageSize') ?? '', 10)
+    const pageSize = Number.isFinite(pageSizeParam) ? Math.min(Math.max(pageSizeParam, 1), 200) : 100
+
+    const { tasks, total } = await getTasks({ customerId, ca, assignee, status, page, pageSize })
+    if (page) {
+      return Response.json({ tasks, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
+    }
     return Response.json(tasks)
   } catch (e) {
     console.error(e)
@@ -31,8 +46,8 @@ export async function POST(request: NextRequest) {
       data: {
         customerId: body.customerId,
         name: body.name ?? '',
-        ca: body.ca ?? '',
-        assignee: body.assignee ?? '',
+        ca: normalizeCa(body.ca ?? ''),
+        assignee: normalizeCa(body.assignee ?? ''),
         content: body.content,
         deadline: body.deadline ? new Date(body.deadline) : null,
         priority: body.priority ?? '中',

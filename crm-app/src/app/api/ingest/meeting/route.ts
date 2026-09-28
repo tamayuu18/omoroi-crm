@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { normalizeCa } from '@/lib/ca'
 import { markInterviewHeld } from '@/lib/db'
 
 /**
@@ -119,7 +120,7 @@ export async function POST(req: NextRequest) {
       data: {
         customerId: customer.id,
         name: customer.name,
-        ca: rec.ca || customer.ca || '',
+        ca: normalizeCa(rec.ca || customer.ca || ''),
         date,
         type: '議事録',
         result: rec.result || '',

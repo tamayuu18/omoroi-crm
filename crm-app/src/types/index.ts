@@ -2,8 +2,30 @@ import type { Customer as PrismaCustomer, Task, Meeting, History as PrismaHistor
 
 export type { Task, Meeting, Yomi, Job, JobProposal, ProposalNote }
 
+// 提案一覧に結合する求人情報（求人票本文 detail などの重いカラムは含めない）
+export type ProposalJob = Pick<Job, 'id' | 'company' | 'title' | 'area' | 'salary' | 'sourceUrl' | 'status'>
+
 // 提案に紐づく求人情報・社内メモを含めた表示用の型
-export type JobProposalWithJob = JobProposal & { job: Job; proposalNotes: ProposalNote[] }
+export type JobProposalWithJob = JobProposal & { job: ProposalJob; proposalNotes: ProposalNote[] }
+
+// 求人一覧・選択肢用（求人票本文 detail / 社内メモ note を除いたもの）
+export type JobSummary = Omit<Job, 'detail' | 'note'>
+
+// ダッシュボード（/api/dashboard）。件数はすべてDB側で集計済み
+export type DashboardYomiCustomer = Pick<
+  PrismaCustomer,
+  'id' | 'name' | 'ca' | 'status' | 'expectedCloseMonth' | 'yomiRank' | 'expectedRevenue' | 'feeRate' | 'fixedFee'
+>
+export type DashboardStats = {
+  totalCustomers: number
+  unreachable: number
+  weekMeetings: number
+  overdueTasks: number
+  statusCounts: { status: string; count: number }[]
+  caCounts: { ca: string; count: number }[]
+  recentCancelled: { id: string; date: Date | null; customerId: string; ca: string | null; customerName: string }[]
+  yomiCustomers: DashboardYomiCustomer[]
+}
 
 // CA別KPI集計の1行（すべて人数ベース。同一求職者は各段階で1人として数える）
 export type KpiRow = {
