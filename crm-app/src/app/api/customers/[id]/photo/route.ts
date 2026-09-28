@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 import { type NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAppSession } from '@/lib/session'
 import { getCustomerPhoto } from '@/lib/db'
 
 /**
@@ -16,7 +15,7 @@ export async function GET(
   _req: NextRequest,
   ctx: RouteContext<'/api/customers/[id]/photo'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params

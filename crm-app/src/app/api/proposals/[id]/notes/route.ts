@@ -1,6 +1,5 @@
 import { type NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAppSession } from '@/lib/session'
 import { addProposalNote } from '@/lib/db'
 
 // 提案ごとの社内メモは追記専用。編集・削除のエンドポイントは意図的に用意していない
@@ -9,7 +8,7 @@ export async function POST(
   request: NextRequest,
   ctx: RouteContext<'/api/proposals/[id]/notes'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params

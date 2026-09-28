@@ -1,6 +1,5 @@
 import { type NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAppSession } from '@/lib/session'
 import { getJobById, updateJob, deleteJob } from '@/lib/db'
 import { prisma } from '@/lib/prisma'
 
@@ -10,7 +9,7 @@ export async function GET(
   _req: NextRequest,
   ctx: RouteContext<'/api/jobs/[id]'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params
@@ -28,7 +27,7 @@ export async function PATCH(
   request: NextRequest,
   ctx: RouteContext<'/api/jobs/[id]'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params
@@ -46,7 +45,7 @@ export async function DELETE(
   _req: NextRequest,
   ctx: RouteContext<'/api/jobs/[id]'>
 ) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await ctx.params

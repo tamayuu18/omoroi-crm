@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 import { type NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAppSession } from '@/lib/session'
 import { getDashboardStats } from '@/lib/db'
 
 /**
@@ -17,7 +16,7 @@ import { getDashboardStats } from '@/lib/db'
  *   todayStart        今日の0時（これより前の期限のタスクを期限切れとみなす）
  */
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {

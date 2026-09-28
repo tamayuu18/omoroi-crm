@@ -1,13 +1,12 @@
 export const dynamic = 'force-dynamic'
 import { type NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAppSession } from '@/lib/session'
 import { getTasks } from '@/lib/db'
 import { prisma } from '@/lib/prisma'
 import { normalizeCa } from '@/lib/ca'
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
@@ -37,7 +36,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions)
+  const session = await getAppSession()
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
