@@ -10,6 +10,7 @@ import {
 } from './constants'
 import type { KpiRow, DashboardStats } from '@/types'
 import { normalizeCa, caWhere } from './ca'
+import { stripNullCharsDeep } from './utils'
 
 // 担当CA名を持つレコードの作成・更新時に、CA名の表記ゆれ（例: 「岩田珠優（社用）」）を正式名へ寄せる
 function withNormalizedCa<T extends { ca?: string | null }>(data: T): T {
@@ -308,12 +309,14 @@ export async function getJobById(id: string) {
   return prisma.job.findUnique({ where: { id } })
 }
 
+// 求人票の自動取込テキストには NUL 文字が混入することがあり、そのままでは Postgres が保存を拒否する（22021）。
+// 保存直前にすべての文字列から取り除く。
 export async function createJob(data: Omit<Job, 'id' | 'createdAt' | 'updatedAt'>) {
-  return prisma.job.create({ data })
+  return prisma.job.create({ data: stripNullCharsDeep(data) })
 }
 
 export async function updateJob(id: string, data: Partial<Job>) {
-  return prisma.job.update({ where: { id }, data })
+  return prisma.job.update({ where: { id }, data: stripNullCharsDeep(data) })
 }
 
 export async function deleteJob(id: string) {

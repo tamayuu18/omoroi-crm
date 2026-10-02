@@ -24,3 +24,21 @@ export function calcAge(birthDate: string | null | undefined): string {
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) age--
   return age >= 0 && age <= 130 ? String(age) : ''
 }
+
+// Postgres の TEXT 型は NUL 文字（\u0000）を保存できない（SQLSTATE 22021: invalid byte sequence for encoding "UTF8": 0x00）。
+// 求人票の自動取込などで外部サイト由来のテキストに混入することがあるため、保存前に取り除く。
+export function stripNullChars(s: string): string {
+  return s.replace(/\u0000/g, '')
+}
+
+// オブジェクト・配列を再帰的にたどり、含まれる文字列すべてから NUL 文字を取り除く（Date 等はそのまま返す）
+export function stripNullCharsDeep<T>(value: T): T {
+  if (typeof value === 'string') return stripNullChars(value) as T
+  if (Array.isArray(value)) return value.map(v => stripNullCharsDeep(v)) as T
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, stripNullCharsDeep(v)])
+    ) as T
+  }
+  return value
+}
