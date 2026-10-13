@@ -85,7 +85,8 @@ model JobProposal {
   ca         String?
   status     String    @default("提案")  // 提案/意思確認/応募/書類選考/面接/内定/承諾/辞退/見送り
   proposedAt DateTime  @default(now())
-  interviewDate DateTime? // 面接日
+  appliedAt  DateTime? // 応募日（企業への書類提出日）。ステータスが応募以降に進んだ時に自動記録
+  interviewDate DateTime? // 一次面接日
   decidedAt  DateTime?
   note       String?
   createdAt  DateTime  @default(now())

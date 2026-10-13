@@ -23,7 +23,8 @@ const PROPOSAL_SORT_OPTIONS = [
   { value: 'proposedAt', label: '提案日' },
   { value: 'status', label: 'ステータス（選考順）' },
   { value: 'company', label: '会社名' },
-  { value: 'interviewDate', label: '面接日' },
+  { value: 'appliedAt', label: '応募日' },
+  { value: 'interviewDate', label: '一次面接日' },
 ] as const
 type ProposalSortKey = typeof PROPOSAL_SORT_OPTIONS[number]['value']
 
@@ -74,10 +75,11 @@ export function ProposalSection({
           return (statusRank(a.status) - statusRank(b.status)) * factor
         case 'company':
           return a.job.company.localeCompare(b.job.company, 'ja') * factor
+        case 'appliedAt':
         case 'interviewDate': {
-          const at = toTime(a.interviewDate)
-          const bt = toTime(b.interviewDate)
-          // 面接日未設定は昇順・降順どちらでも末尾に置く
+          const at = toTime(a[sortBy])
+          const bt = toTime(b[sortBy])
+          // 日付未設定は昇順・降順どちらでも末尾に置く
           if (at === null && bt === null) return 0
           if (at === null) return 1
           if (bt === null) return -1
@@ -185,13 +187,14 @@ export function ProposalSection({
     onUpdate()
   }
 
-  async function changeInterviewDate(id: string, interviewDate: string) {
+  // 応募日（書類提出日）・一次面接日の更新。空文字で解除
+  async function changeDate(id: string, field: 'appliedAt' | 'interviewDate', value: string) {
     const res = await fetch(`/api/proposals/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ interviewDate }),
+      body: JSON.stringify({ [field]: value }),
     })
-    if (!res.ok) { alert('面接日の更新に失敗しました'); return }
+    if (!res.ok) { alert(`${field === 'appliedAt' ? '応募日' : '一次面接日'}の更新に失敗しました`); return }
     onUpdate()
   }
 
@@ -314,12 +317,21 @@ export function ProposalSection({
                       </a>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500">
-                    <Calendar size={12} className="text-gray-400" />
-                    面接日
-                    <input type="date" value={fmtInput(p.interviewDate)}
-                      onChange={e => changeInterviewDate(p.id, e.target.value)}
-                      className="border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-600" />
+                  <div className="flex items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-gray-500 flex-wrap">
+                    <span className="flex items-center gap-1.5" title="企業への書類提出日。ステータスを「応募」以降にすると自動で記録されます">
+                      <Calendar size={12} className="text-gray-400" />
+                      応募日
+                      <input type="date" value={fmtInput(p.appliedAt)}
+                        onChange={e => changeDate(p.id, 'appliedAt', e.target.value)}
+                        className="border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-600" />
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <Calendar size={12} className="text-gray-400" />
+                      一次面接日
+                      <input type="date" value={fmtInput(p.interviewDate)}
+                        onChange={e => changeDate(p.id, 'interviewDate', e.target.value)}
+                        className="border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-600" />
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">

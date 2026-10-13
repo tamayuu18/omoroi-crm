@@ -161,14 +161,15 @@ export async function GET(req: NextRequest) {
   }
 
   // 求人提案（選考ファネル）
+  // appliedDaysAgo = 応募日（企業への書類提出日）。初回面談から5営業日以上かかっているとKPIで警告表示になる
   const proposals = [
-    { name: '佐藤 健太', job: 'ITソリューション営業', status: '内定', daysAgo: 35, interviewDaysAgo: 10 },
-    { name: '鈴木 美咲', job: '経理・財務スタッフ', status: '面接', daysAgo: 20, interviewDaysAgo: -3 },
-    { name: '高橋 大輔', job: '購買・SCM担当', status: '書類選考', daysAgo: 12 },
+    { name: '佐藤 健太', job: 'ITソリューション営業', status: '内定', daysAgo: 35, appliedDaysAgo: 30, interviewDaysAgo: 10 },
+    { name: '鈴木 美咲', job: '経理・財務スタッフ', status: '面接', daysAgo: 20, appliedDaysAgo: 22, interviewDaysAgo: -3 },
+    { name: '高橋 大輔', job: '購買・SCM担当', status: '書類選考', daysAgo: 12, appliedDaysAgo: 11 },
     { name: '田中 さくら', job: 'UI/UXデザイナー', status: '提案', daysAgo: 5 },
     { name: '田中 さくら', job: 'ITソリューション営業', status: '見送り', daysAgo: 8 },
-    { name: '山田 花子', job: '建築施工管理', status: '承諾', daysAgo: 50, interviewDaysAgo: 30 },
-    { name: '井上 直樹', job: '製造部門マネージャー', status: '面接', daysAgo: 10, interviewDaysAgo: -2 },
+    { name: '山田 花子', job: '建築施工管理', status: '承諾', daysAgo: 50, appliedDaysAgo: 49, interviewDaysAgo: 30 },
+    { name: '井上 直樹', job: '製造部門マネージャー', status: '面接', daysAgo: 10, appliedDaysAgo: 9, interviewDaysAgo: -2 },
   ]
   for (const p of proposals) {
     const c = byName(p.name)
@@ -177,6 +178,7 @@ export async function GET(req: NextRequest) {
       data: {
         customerId: c.id, jobId: j.id, ca: c.ca, status: p.status,
         proposedAt: daysAgo(p.daysAgo),
+        appliedAt: p.appliedDaysAgo != null ? daysAgo(p.appliedDaysAgo) : null,
         interviewDate: p.interviewDaysAgo != null ? daysAgo(p.interviewDaysAgo) : null,
         decidedAt: ['内定', '承諾', '辞退', '見送り'].includes(p.status) ? daysAgo(Math.max(0, p.daysAgo - 20)) : null,
       },

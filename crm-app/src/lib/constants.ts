@@ -37,12 +37,32 @@ export const PROPOSAL_STATUS_OPTIONS = [
 
 // KPI集計で「選考到達」とみなす提案ステータス
 export const PROPOSAL_SELECTION_STATUSES = ['応募', '書類選考', '面接', '内定', '承諾']
+// 「応募（企業への書類提出）済み」とみなす提案ステータス（選考到達と同じ）。
+// 応募日(appliedAt)が未入力でも、ステータスがここに含まれていれば応募済みとして数える。
+export const PROPOSAL_APPLIED_STATUSES = PROPOSAL_SELECTION_STATUSES
+// 面接前に決着した（面接が実施されなかった）とみなす提案ステータス
+export const PROPOSAL_CLOSED_STATUSES = ['辞退', '見送り']
 // KPI集計で「面接到達」とみなす提案ステータス
 export const PROPOSAL_INTERVIEW_STATUSES = ['面接', '内定', '承諾']
 // KPI集計で「内定到達」とみなす提案ステータス
 export const PROPOSAL_OFFER_STATUSES = ['内定', '承諾']
 // KPI集計で「承諾」とみなす提案ステータス
 export const PROPOSAL_ACCEPTED_STATUSES = ['承諾']
+
+// 初回面談から書類提出（応募）までの営業日数がこの値以上ならアラートを出す
+export const DOC_SUBMIT_ALERT_BUSINESS_DAYS = 5
+
+// 初回面談は実施済みだが、まだどの求人にも応募していない段階の顧客ステータス。
+// 「書類提出が遅れている」アラートはこのステータスの顧客だけを対象にする。
+export const DOC_SUBMIT_PENDING_STATUSES = ['面談実施済み', '求人提案中', '応募意思確認中']
+
+// 面談レコード自体が「実施済み」を表す status
+export const MEETING_HELD_STATUSES = ['実施', '実施済', '面談実施済み', '完了']
+
+// 初回面談前（面談未実施）とみなす顧客ステータス
+export const PRE_INTERVIEW_STATUSES = [
+  '新規送客', '初回未対応', '初回連絡済み', '不通', '面談予約済み', '面談キャンセル', 'リスケ調整中',
+]
 
 export const TIMING_OPTIONS = ['すぐにでも', '1ヶ月以内', '3ヶ月以内', '半年以内', '1年以内', '時期未定']
 

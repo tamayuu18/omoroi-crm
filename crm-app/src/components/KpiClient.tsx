@@ -1,8 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { BarChart3, ChevronLeft, ChevronRight } from 'lucide-react'
-import type { KpiRow } from '@/types'
+import { BarChart3, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react'
+import { format, parseISO } from 'date-fns'
+import type { KpiRow, KpiLeadTimeRow } from '@/types'
+import { DOC_SUBMIT_ALERT_BUSINESS_DAYS } from '@/lib/constants'
+import { cn } from '@/lib/utils'
 
 // 月を1つずらす（'YYYY-MM'）
 function shiftMonth(month: string, delta: number): string {
@@ -17,23 +20,34 @@ function rate(num: number, den: number): string {
   return `${Math.round((num / den) * 100)}%`
 }
 
-type MetricLine = { label: string; value: number; rateLabel?: string; rate?: string }
+function fmtDate(d: Date | string | null | undefined) {
+  if (!d) return '—'
+  try { return format(typeof d === 'string' ? parseISO(d) : d, 'M/d') } catch { return '—' }
+}
+
+type MetricLine = { label: string; value: number; unit: '人' | '件'; rateLabel?: string; rate?: string; rateNote?: string }
 
 function buildLines(r: KpiRow): MetricLine[] {
   return [
-    { label: '面談設定数', value: r.meetingsSet },
-    { label: '初回面談数', value: r.firstMeetings, rateLabel: '面談実施率', rate: rate(r.firstMeetings, r.meetingsSet) },
-    { label: '求人提案数', value: r.proposals, rateLabel: '求人提案率', rate: rate(r.proposals, r.firstMeetings) },
-    { label: '選考数', value: r.selections, rateLabel: '求人承諾率', rate: rate(r.selections, r.proposals) },
-    { label: '面接数', value: r.interviews, rateLabel: '面接移行率', rate: rate(r.interviews, r.selections) },
-    { label: '内定数', value: r.offers, rateLabel: '選考通過率', rate: rate(r.offers, r.selections) },
-    { label: '内定承諾数', value: r.accepted, rateLabel: '内定承諾率', rate: rate(r.accepted, r.offers) },
+    { label: '面談設定数', value: r.meetingsSet, unit: '人' },
+    { label: '初回面談数', value: r.firstMeetings, unit: '人', rateLabel: '面談実施率', rate: rate(r.firstMeetings, r.meetingsSet) },
+    { label: '求人提案数', value: r.proposals, unit: '人', rateLabel: '求人提案率', rate: rate(r.proposals, r.firstMeetings) },
+    { label: '選考数', value: r.selections, unit: '人', rateLabel: '求人承諾率', rate: rate(r.selections, r.proposals) },
+    { label: '応募件数', value: r.applications, unit: '件' },
+    { label: '面接数', value: r.interviews, unit: '人', rateLabel: '面接移行率', rate: rate(r.interviews, r.selections) },
+    {
+      label: '一次面接実施件数', value: r.firstInterviews, unit: '件',
+      rateLabel: '一次面接実施率', rate: rate(r.firstInterviewCustomers, r.firstMeetings),
+      rateNote: `${r.firstInterviewCustomers}人 / 初回面談${r.firstMeetings}人`,
+    },
+    { label: '内定数', value: r.offers, unit: '人', rateLabel: '選考通過率', rate: rate(r.offers, r.selections) },
+    { label: '内定承諾数', value: r.accepted, unit: '人', rateLabel: '内定承諾率', rate: rate(r.accepted, r.offers) },
   ]
 }
 
 function CaCard({ row }: { row: KpiRow }) {
   const lines = buildLines(row)
-  const total = row.meetingsSet + row.firstMeetings + row.proposals + row.selections + row.interviews + row.offers + row.accepted
+  const total = lines.reduce((sum, l) => sum + l.value, 0)
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
       <div className="px-4 py-2.5 border-b border-gray-100 font-bold text-gray-800">{row.ca}</div>
@@ -41,14 +55,14 @@ function CaCard({ row }: { row: KpiRow }) {
         <tbody>
           {lines.map(l => (
             <tr key={l.label} className="border-b border-gray-50 last:border-0">
-              <td className="py-1.5 px-4 text-gray-600 w-32">{l.label}</td>
+              <td className="py-1.5 px-4 text-gray-600 w-36">{l.label}</td>
               <td className="py-1.5 px-2 text-right font-medium text-gray-900 w-14 tabular-nums whitespace-nowrap">
-                {l.value}<span className="text-xs font-normal text-gray-400 ml-0.5">人</span>
+                {l.value}<span className="text-xs font-normal text-gray-400 ml-0.5">{l.unit}</span>
               </td>
-              <td className="py-1.5 px-2 text-gray-400 text-xs">{l.rateLabel}</td>
+              <td className="py-1.5 px-2 text-gray-400 text-xs" title={l.rateNote}>{l.rateLabel}</td>
               <td className="py-1.5 px-4 text-right w-16">
                 {l.rate ? (
-                  <span className={l.rate === '—' ? 'text-gray-300' : 'text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-xs font-medium'}>{l.rate}</span>
+                  <span title={l.rateNote} className={l.rate === '—' ? 'text-gray-300' : 'text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-xs font-medium'}>{l.rate}</span>
                 ) : null}
               </td>
             </tr>
@@ -60,9 +74,104 @@ function CaCard({ row }: { row: KpiRow }) {
   )
 }
 
+// 候補者別リードタイム（初回面談→書類提出→一次面接実施）
+function LeadTimeTable({ rows }: { rows: KpiLeadTimeRow[] }) {
+  const [alertOnly, setAlertOnly] = useState(false)
+  const [caFilter, setCaFilter] = useState('')
+  const cas = Array.from(new Set(rows.map(r => r.ca)))
+  const shown = rows.filter(r => (!alertOnly || r.docAlert) && (!caFilter || r.ca === caFilter))
+  const alertCount = rows.filter(r => r.docAlert).length
+
+  const docCell = (r: KpiLeadTimeRow) => {
+    if (r.docBusinessDays === null) return <span className="text-gray-300">—</span>
+    return (
+      <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium tabular-nums whitespace-nowrap',
+        r.docAlert ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700')}>
+        {r.docBusinessDays}営業日{r.docPending ? '経過' : ''}
+      </span>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-bold text-gray-800">候補者別リードタイム</div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            初回面談→書類提出（営業日）、初回面談→一次面接実施（日数）。書類提出まで{DOC_SUBMIT_ALERT_BUSINESS_DAYS}営業日以上は赤で表示
+            {alertCount > 0 && <span className="ml-1 text-red-600 font-medium">（{alertCount}人）</span>}
+          </div>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-gray-600">
+          <select value={caFilter} onChange={e => setCaFilter(e.target.value)}
+            className="border border-gray-200 rounded px-2 py-1 text-xs">
+            <option value="">全CA</option>
+            {cas.map(ca => <option key={ca} value={ca}>{ca}</option>)}
+          </select>
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input type="checkbox" checked={alertOnly} onChange={e => setAlertOnly(e.target.checked)} />
+            {DOC_SUBMIT_ALERT_BUSINESS_DAYS}営業日以上のみ
+          </label>
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <div className="px-4 py-6 text-center text-sm text-gray-300">該当する求職者がいません</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="bg-gray-50 text-xs text-gray-500">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold">氏名</th>
+                <th className="text-left px-2 py-2 font-semibold">担当CA</th>
+                <th className="text-left px-2 py-2 font-semibold">ステータス</th>
+                <th className="text-left px-2 py-2 font-semibold">初回面談</th>
+                <th className="text-left px-2 py-2 font-semibold">書類提出</th>
+                <th className="text-left px-2 py-2 font-semibold">営業日数</th>
+                <th className="text-left px-2 py-2 font-semibold">一次面接</th>
+                <th className="text-left px-4 py-2 font-semibold">日数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(r => (
+                <tr key={r.customerId} className={cn('border-t border-gray-50', r.docAlert && 'bg-red-50/40')}>
+                  <td className="px-4 py-2">
+                    <a href={`/customers/${r.customerId}`} className="text-blue-600 hover:underline font-medium">{r.name}</a>
+                  </td>
+                  <td className="px-2 py-2 text-gray-500 text-xs">{r.ca}</td>
+                  <td className="px-2 py-2 text-gray-500 text-xs">{r.status}</td>
+                  <td className="px-2 py-2 text-gray-700 tabular-nums">
+                    {fmtDate(r.firstMeetingAt)}
+                    {!r.meetingHeld && <span className="ml-1 text-xs text-gray-400">未実施</span>}
+                  </td>
+                  <td className="px-2 py-2 text-gray-700 tabular-nums">
+                    {r.appliedAt ? fmtDate(r.appliedAt) : <span className={r.docPending ? 'text-red-600 text-xs' : 'text-gray-300'}>{r.docPending ? '未提出' : '—'}</span>}
+                  </td>
+                  <td className="px-2 py-2">{docCell(r)}</td>
+                  <td className="px-2 py-2 text-gray-700 tabular-nums">{r.firstInterviewAt ? fmtDate(r.firstInterviewAt) : <span className="text-gray-300">—</span>}</td>
+                  <td className="px-4 py-2 tabular-nums">
+                    {r.interviewDays !== null
+                      ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 whitespace-nowrap">{r.interviewDays}日</span>
+                      : <span className="text-gray-300">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const EMPTY_TOTALS: KpiRow = {
+  ca: '全体', meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, applications: 0,
+  interviews: 0, firstInterviews: 0, firstInterviewCustomers: 0, offers: 0, accepted: 0,
+}
+
 export function KpiClient() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [rows, setRows] = useState<KpiRow[]>([])
+  const [leadTimes, setLeadTimes] = useState<KpiLeadTimeRow[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchKpi = useCallback(async () => {
@@ -71,6 +180,7 @@ export function KpiClient() {
     if (res.ok) {
       const data = await res.json()
       setRows(data.rows)
+      setLeadTimes(data.leadTimes ?? [])
     }
     setLoading(false)
   }, [month])
@@ -85,11 +195,14 @@ export function KpiClient() {
       firstMeetings: acc.firstMeetings + r.firstMeetings,
       proposals: acc.proposals + r.proposals,
       selections: acc.selections + r.selections,
+      applications: acc.applications + r.applications,
       interviews: acc.interviews + r.interviews,
+      firstInterviews: acc.firstInterviews + r.firstInterviews,
+      firstInterviewCustomers: acc.firstInterviewCustomers + r.firstInterviewCustomers,
       offers: acc.offers + r.offers,
       accepted: acc.accepted + r.accepted,
     }),
-    { ca: '全体', meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, interviews: 0, offers: 0, accepted: 0 }
+    EMPTY_TOTALS
   )
 
   const [y, m] = month.split('-')
@@ -109,7 +222,7 @@ export function KpiClient() {
       </div>
 
       <p className="text-xs text-gray-400">
-        すべての数値は人数ベースです（同じ求職者に複数の面談・提案があっても各段階で1人として計上）。面談設定数・初回面談数は面談日、求人提案数以降は求職者の初回面談月を基準に自動集計しています（{y}年{Number(m)}月に初回面談をした求職者について、その後の提案・選考・面接・内定・承諾もこの月の実績として計上）。
+        「人」の数値は人数ベース（同じ求職者に複数の面談・提案があっても各段階で1人として計上）、「件」の数値は応募社数ベース（1人が2社に応募すれば2件）です。面談設定数・初回面談数は面談日、求人提案数以降は求職者の初回面談月を基準に自動集計しています（{y}年{Number(m)}月に初回面談をした求職者について、その後の提案・応募・選考・面接・内定・承諾もこの月の実績として計上）。一次面接実施率は「一次面接を1件以上実施した人数 ÷ 初回面談数」です。
       </p>
 
       {loading ? (
@@ -120,6 +233,11 @@ export function KpiClient() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {rows.map(r => <CaCard key={r.ca} row={r} />)}
           </div>
+          <div className="flex items-center gap-2 text-xs text-gray-400 pt-2">
+            <FileWarning size={14} className="text-amber-500" />
+            書類提出が遅れている求職者は、ダッシュボードにも「書類提出が遅れている求職者」として表示されます。
+          </div>
+          <LeadTimeTable rows={leadTimes} />
         </>
       )}
     </div>

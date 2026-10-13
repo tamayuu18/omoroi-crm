@@ -7,9 +7,16 @@ import {
   PROPOSAL_INTERVIEW_STATUSES,
   PROPOSAL_OFFER_STATUSES,
   PROPOSAL_ACCEPTED_STATUSES,
+  PROPOSAL_APPLIED_STATUSES,
+  PROPOSAL_CLOSED_STATUSES,
+  PRE_INTERVIEW_STATUSES,
+  MEETING_HELD_STATUSES,
+  DOC_SUBMIT_PENDING_STATUSES,
+  DOC_SUBMIT_ALERT_BUSINESS_DAYS,
 } from './constants'
-import type { KpiRow, DashboardStats } from '@/types'
-import { normalizeCa, caWhere } from './ca'
+import type { KpiRow, KpiLeadTimeRow, DashboardStats } from '@/types'
+import { normalizeCa, caWhere, caVariants } from './ca'
+import { businessDaysBetween, calendarDaysBetween, jstDayEndUtc } from './leadTime'
 
 // 担当CA名を持つレコードの作成・更新時に、CA名の表記ゆれ（例: 「岩田珠優（社用）」）を正式名へ寄せる
 function withNormalizedCa<T extends { ca?: string | null }>(data: T): T {
@@ -150,13 +157,9 @@ export async function createCustomer(data: Omit<Customer, 'id' | 'registeredAt' 
   return prisma.customer.create({ data: withNormalizedCa(data) })
 }
 
-// 面談がまだ「実施済み」とみなせない顧客ステータス（これら以外は面談実施後のステータス）
-export const PRE_INTERVIEW_STATUSES = [
-  '新規送客', '初回未対応', '初回連絡済み', '不通', '面談予約済み', '面談キャンセル', 'リスケ調整中',
-]
-
-// Meeting自体が「実施済み」を表す status
-const MEETING_HELD_STATUSES = ['実施', '実施済', '面談実施済み', '完了']
+// 面談がまだ「実施済み」とみなせない顧客ステータス（これら以外は面談実施後のステータス）。
+// 定義は constants.ts に移した（画面側でも使うため）。既存の import 先互換のためここからも公開する
+export { PRE_INTERVIEW_STATUSES }
 
 async function syncMeetingHeldStatus(customerId: string, status?: string | null) {
   if (!status || PRE_INTERVIEW_STATUSES.includes(status)) return
@@ -338,11 +341,19 @@ export async function getProposals(filters?: { customerId?: string; jobId?: stri
   })
 }
 
-export async function createProposal(data: Omit<JobProposal, 'id' | 'createdAt' | 'updatedAt' | 'proposedAt' | 'decidedAt' | 'interviewDate'> & { proposedAt?: Date }) {
-  return prisma.jobProposal.create({ data: withNormalizedCa(data), include: PROPOSAL_INCLUDE })
+export async function createProposal(data: Omit<JobProposal, 'id' | 'createdAt' | 'updatedAt' | 'proposedAt' | 'decidedAt' | 'interviewDate' | 'appliedAt'> & { proposedAt?: Date; appliedAt?: Date | null }) {
+  const input = withNormalizedCa(data)
+  // 最初から応募以降のステータスで登録された場合も応募日を残す
+  if (input.appliedAt === undefined && PROPOSAL_APPLIED_STATUSES.includes(input.status)) input.appliedAt = new Date()
+  return prisma.jobProposal.create({ data: input, include: PROPOSAL_INCLUDE })
 }
 
 export async function updateProposal(id: string, data: Partial<JobProposal>) {
+  // ステータスが応募以降に進んだとき、応募日（書類提出日）が未記録ならその時点を記録する。
+  // 明示的に appliedAt が渡された場合（手入力・解除）はそちらを優先する。
+  if (data.appliedAt === undefined && typeof data.status === 'string' && PROPOSAL_APPLIED_STATUSES.includes(data.status)) {
+    await prisma.jobProposal.updateMany({ where: { id, appliedAt: null }, data: { appliedAt: new Date() } })
+  }
   return prisma.jobProposal.update({ where: { id }, data: withNormalizedCa(data), include: PROPOSAL_INCLUDE })
 }
 
@@ -367,7 +378,7 @@ export async function getDashboardStats(params: {
 }): Promise<DashboardStats> {
   const customerWhere: Prisma.CustomerWhereInput = params.ca ? { ca: caWhere(params.ca) } : {}
 
-  const [byStatusCa, weekMeetings, overdueTasks, recentCancelled, yomiRows] = await Promise.all([
+  const [byStatusCa, weekMeetings, overdueTasks, recentCancelled, yomiRows, docSubmitAlerts] = await Promise.all([
     prisma.customer.groupBy({
       by: ['status', 'ca'],
       where: customerWhere,
@@ -401,6 +412,7 @@ export async function getDashboardStats(params: {
       },
       orderBy: { expectedCloseMonth: 'asc' },
     }),
+    getDocSubmitAlerts(params.ca),
   ])
 
   let totalCustomers = 0
@@ -437,6 +449,55 @@ export async function getDashboardStats(params: {
     yomiCustomers: yomiRows
       .filter((c) => c.expectedCloseMonth || c.yomiRank)
       .map((c) => ({ ...c, ca: normalizeCa(c.ca) })),
+    docSubmitAlerts,
+  }
+}
+
+// 初回面談は実施済みなのに、5営業日以上たっても書類提出（応募）がない求職者。
+// 初回面談日は「キャンセル以外で最も古い面談日」（KPI・顧客一覧と同じ定義）。
+// 営業日の計算はNode側で行うので、SQLでは暦日で緩めに絞ってから数え直す。
+async function getDocSubmitAlerts(ca?: string): Promise<DashboardStats['docSubmitAlerts']> {
+  try {
+    const now = new Date()
+    // 5営業日は暦日で最低でも5日はかかるので、それより新しい面談は対象外
+    const cutoff = new Date(now.getTime() - DOC_SUBMIT_ALERT_BUSINESS_DAYS * 24 * 60 * 60 * 1000)
+    const caFilter = ca
+      ? Prisma.sql`AND c."ca" IN (${Prisma.join(caVariants(ca))})`
+      : Prisma.empty
+    const rows = await prisma.$queryRaw<{ id: string; name: string; ca: string | null; status: string; firstMeetingAt: Date }[]>`
+      SELECT c."id", c."name", c."ca", c."status", k."firstMeetingAt"
+      FROM "Customer" c
+      JOIN (
+        SELECT "customerId", MIN("date") AS "firstMeetingAt"
+        FROM "Meeting"
+        WHERE "status" <> 'キャンセル' AND "date" IS NOT NULL
+        GROUP BY "customerId"
+      ) k ON k."customerId" = c."id"
+      WHERE c."status" IN (${Prisma.join(DOC_SUBMIT_PENDING_STATUSES)})
+        AND k."firstMeetingAt" < ${cutoff}
+        AND NOT EXISTS (
+          SELECT 1 FROM "JobProposal" p
+          WHERE p."customerId" = c."id"
+            AND (p."appliedAt" IS NOT NULL OR p."status" IN (${Prisma.join(PROPOSAL_APPLIED_STATUSES)}))
+        )
+        ${caFilter}
+      ORDER BY k."firstMeetingAt" ASC
+      LIMIT 200
+    `
+    return rows
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        ca: normalizeCa(r.ca),
+        status: r.status,
+        firstMeetingAt: r.firstMeetingAt,
+        businessDays: businessDaysBetween(r.firstMeetingAt, now) ?? 0,
+      }))
+      .filter((r) => r.businessDays >= DOC_SUBMIT_ALERT_BUSINESS_DAYS)
+      .sort((a, b) => b.businessDays - a.businessDays)
+  } catch (e) {
+    console.error('getDocSubmitAlerts failed (JobProposal.appliedAt 未作成の可能性。/api/setup を実行してください)', e)
+    return []
   }
 }
 
@@ -449,17 +510,104 @@ export async function getDashboardStats(params: {
 // 集計はすべてDB側（COUNT DISTINCT）で行い、アプリには CA ごとの件数だけを返す。
 // 以前は対象月の面談と提案の行を取得して Node 側で数えていた上、初回面談月の判定のために
 // 全期間の面談を groupBy で取得していた。
-export async function getKpi(month: string): Promise<KpiRow[]> {
-  // 月初〜翌月初（[start, end)）
+
+// 月（'YYYY-MM'）の範囲 [start, end) を、SQLで比較できる形にする。
+// Prisma は DateTime を UTC の timestamp として保存しているので、比較値も UTC に固定する。
+function monthRangeSql(month: string) {
   const [y, m] = month.split('-').map(Number)
   const start = new Date(y, (m ?? 1) - 1, 1)
   const end = new Date(y, m ?? 1, 1)
-  // Prisma は DateTime を UTC の timestamp として保存しているので、比較値も UTC に固定する
-  const startSql = Prisma.sql`(${start.toISOString()}::timestamptz AT TIME ZONE 'UTC')`
-  const endSql = Prisma.sql`(${end.toISOString()}::timestamptz AT TIME ZONE 'UTC')`
+  return {
+    startSql: Prisma.sql`(${start.toISOString()}::timestamptz AT TIME ZONE 'UTC')`,
+    endSql: Prisma.sql`(${end.toISOString()}::timestamptz AT TIME ZONE 'UTC')`,
+  }
+}
+
+// 提案 p が「応募（書類提出）済み」: ステータスが応募以降、または応募日が入力済み
+const proposalAppliedSql = Prisma.sql`(p."appliedAt" IS NOT NULL OR p."status" IN (${Prisma.join(PROPOSAL_APPLIED_STATUSES)}))`
+
+// 提案 p の一次面接が「実施済み」: 一次面接日が今日（日本時間）以前。
+// ただし辞退・見送りで面接日より前に決着したものは未実施扱い（leadTime.ts の isFirstInterviewHeld と同じ条件）
+// 「今日」はクエリ実行時に評価する必要があるので関数にしている
+const firstInterviewHeldSql = () => Prisma.sql`(
+  p."interviewDate" IS NOT NULL
+  AND p."interviewDate" < ${jstDayEndUtc()}
+  AND NOT (
+    p."status" IN (${Prisma.join(PROPOSAL_CLOSED_STATUSES)})
+    AND p."decidedAt" IS NOT NULL
+    AND p."decidedAt" < p."interviewDate"
+  )
+)`
+
+// 対象月に初回面談をした求職者ごとのリードタイム（初回面談→書類提出、初回面談→一次面接実施）。
+// 集計対象は getKpi の提案系指標と同じ「初回面談月コホート」。
+export async function getKpiLeadTimes(month: string): Promise<KpiLeadTimeRow[]> {
+  const { startSql, endSql } = monthRangeSql(month)
+  try {
+    const rows = await prisma.$queryRaw<{
+      customerId: string; name: string; ca: string | null; status: string
+      firstMeetingAt: Date; meetingHeld: boolean; appliedAt: Date | null; firstInterviewAt: Date | null
+    }[]>`
+      WITH cohort AS (
+        SELECT "customerId", MIN("date") AS "firstMeetingAt"
+        FROM "Meeting"
+        WHERE "status" <> 'キャンセル' AND "date" IS NOT NULL
+        GROUP BY "customerId"
+        HAVING MIN("date") >= ${startSql} AND MIN("date") < ${endSql}
+      )
+      SELECT
+        c."id" AS "customerId",
+        c."name",
+        c."ca",
+        c."status",
+        k."firstMeetingAt",
+        (
+          c."status" NOT IN (${Prisma.join(PRE_INTERVIEW_STATUSES)})
+          OR EXISTS (
+            SELECT 1 FROM "Meeting" m
+            WHERE m."customerId" = c."id" AND m."status" <> 'キャンセル'
+              AND (COALESCE(m."result", '') <> '' OR m."status" IN (${Prisma.join(MEETING_HELD_STATUSES)}))
+          )
+        ) AS "meetingHeld",
+        (SELECT MIN(p."appliedAt") FROM "JobProposal" p WHERE p."customerId" = c."id") AS "appliedAt",
+        (SELECT MIN(p."interviewDate") FROM "JobProposal" p WHERE p."customerId" = c."id" AND ${firstInterviewHeldSql()}) AS "firstInterviewAt"
+      FROM cohort k
+      JOIN "Customer" c ON c."id" = k."customerId"
+      ORDER BY k."firstMeetingAt" ASC, c."name" ASC
+    `
+    const now = new Date()
+    return rows.map((r) => {
+      const trackPending = r.meetingHeld && DOC_SUBMIT_PENDING_STATUSES.includes(r.status)
+      const docBusinessDays = r.appliedAt
+        ? businessDaysBetween(r.firstMeetingAt, r.appliedAt)
+        : trackPending ? businessDaysBetween(r.firstMeetingAt, now) : null
+      const interviewDays = r.firstInterviewAt ? calendarDaysBetween(r.firstMeetingAt, r.firstInterviewAt) : null
+      return {
+        customerId: r.customerId,
+        name: r.name,
+        ca: normalizeCa(r.ca) || '未割当',
+        status: r.status,
+        firstMeetingAt: r.firstMeetingAt,
+        meetingHeld: r.meetingHeld,
+        appliedAt: r.appliedAt,
+        docBusinessDays,
+        docPending: !r.appliedAt && trackPending,
+        docAlert: docBusinessDays !== null && docBusinessDays >= DOC_SUBMIT_ALERT_BUSINESS_DAYS,
+        firstInterviewAt: r.firstInterviewAt,
+        interviewDays,
+      }
+    })
+  } catch (e) {
+    console.error('getKpiLeadTimes failed (JobProposal.appliedAt 未作成の可能性。/api/setup を実行してください)', e)
+    return []
+  }
+}
+
+export async function getKpi(month: string): Promise<KpiRow[]> {
+  const { startSql, endSql } = monthRangeSql(month)
 
   const emptyRow = (ca: string): KpiRow =>
-    ({ ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, interviews: 0, offers: 0, accepted: 0 })
+    ({ ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, applications: 0, interviews: 0, firstInterviews: 0, firstInterviewCustomers: 0, offers: 0, accepted: 0 })
 
   // 先に既定CAで行を初期化しておく（クエリが失敗しても必ずCA別カードが出るように）
   const rows = new Map<string, KpiRow>()
@@ -508,7 +656,10 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
     // 求人提案されても、その提案は6月の実績として数える。
     // そのため、まず対象月に初回面談（最も古い非キャンセル面談）を迎えた
     // 求職者を特定し、その求職者の提案を発生時期に関わらずすべて集計する。
-    const proposalRows = await prisma.$queryRaw<{ ca: string; proposals: number; selections: number; interviews: number; offers: number; accepted: number }[]>`
+    //
+    // 応募件数・一次面接実施件数は「応募社数ベース」＝提案（顧客×求人）ごとに1件として数える。
+    // 1人が2社に応募すれば応募件数は2件。
+    const proposalRows = await prisma.$queryRaw<{ ca: string; proposals: number; selections: number; applications: number; interviews: number; firstInterviews: number; firstInterviewCustomers: number; offers: number; accepted: number }[]>`
       WITH cohort AS (
         SELECT "customerId"
         FROM "Meeting"
@@ -520,7 +671,10 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
         COALESCE(NULLIF(p."ca", ''), '未割当') AS "ca",
         COUNT(DISTINCT p."customerId")::int AS "proposals",
         COUNT(DISTINCT p."customerId") FILTER (WHERE p."status" IN (${Prisma.join(PROPOSAL_SELECTION_STATUSES)}))::int AS "selections",
+        COUNT(*) FILTER (WHERE ${proposalAppliedSql})::int AS "applications",
         COUNT(DISTINCT p."customerId") FILTER (WHERE p."status" IN (${Prisma.join(PROPOSAL_INTERVIEW_STATUSES)}))::int AS "interviews",
+        COUNT(*) FILTER (WHERE ${firstInterviewHeldSql()})::int AS "firstInterviews",
+        COUNT(DISTINCT p."customerId") FILTER (WHERE ${firstInterviewHeldSql()})::int AS "firstInterviewCustomers",
         COUNT(DISTINCT p."customerId") FILTER (WHERE p."status" IN (${Prisma.join(PROPOSAL_OFFER_STATUSES)}))::int AS "offers",
         COUNT(DISTINCT p."customerId") FILTER (WHERE p."status" IN (${Prisma.join(PROPOSAL_ACCEPTED_STATUSES)}))::int AS "accepted"
       FROM "JobProposal" p
@@ -531,7 +685,10 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
       const row = rowFor(r.ca)
       row.proposals += r.proposals
       row.selections += r.selections
+      row.applications += r.applications
       row.interviews += r.interviews
+      row.firstInterviews += r.firstInterviews
+      row.firstInterviewCustomers += r.firstInterviewCustomers
       row.offers += r.offers
       row.accepted += r.accepted
     }

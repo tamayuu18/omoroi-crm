@@ -10,10 +10,14 @@ import {
 } from 'lucide-react'
 import type { Customer, Task, Meeting, History, JobProposalWithJob } from '@/types'
 import { ALL_STATUSES } from '@/types'
-import { CA_OPTIONS, ASSIGNEE_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS } from '@/lib/constants'
+import {
+  CA_OPTIONS, ASSIGNEE_OPTIONS, INFLOW_OPTIONS, GENDER_OPTIONS, TIMING_OPTIONS, PREF_OPTIONS,
+  PRE_INTERVIEW_STATUSES, MEETING_HELD_STATUSES, DOC_SUBMIT_PENDING_STATUSES, DOC_SUBMIT_ALERT_BUSINESS_DAYS,
+} from '@/lib/constants'
 import { StatusBadge, YomiRankBadge } from '@/components/StatusBadge'
 import { ProposalSection } from '@/components/ProposalSection'
 import { cn, calcAge, normalizeBirthDate } from '@/lib/utils'
+import { buildLeadTime, isFirstInterviewHeld } from '@/lib/leadTime'
 
 function fmt(d: Date | string | null | undefined) {
   if (!d) return '—'
@@ -33,6 +37,67 @@ const PIPELINE_STAGES = [
 
 function getStageIndex(status: string) {
   return PIPELINE_STAGES.indexOf(status)
+}
+
+const toTime = (d: Date | string | null | undefined) => {
+  if (!d) return null
+  const t = new Date(d as string).getTime()
+  return Number.isNaN(t) ? null : t
+}
+
+// 初回面談 → 書類提出（応募）→ 一次面接実施 のリードタイム。
+// 初回面談日はキャンセル以外で最も古い面談日（KPI・顧客一覧と同じ定義）。
+function LeadTimeSummary({ customer, meetings, proposals }: { customer: Customer; meetings: Meeting[]; proposals: JobProposalWithJob[] }) {
+  const meetingTimes = meetings
+    .filter(m => m.status !== 'キャンセル')
+    .map(m => toTime(m.date))
+    .filter((t): t is number => t !== null)
+  if (meetingTimes.length === 0) return null
+  const firstMeetingAt = new Date(Math.min(...meetingTimes))
+
+  const meetingHeld = !PRE_INTERVIEW_STATUSES.includes(customer.status)
+    || meetings.some(m => m.status !== 'キャンセル' && ((m.result ?? '') !== '' || MEETING_HELD_STATUSES.includes(m.status)))
+  if (!meetingHeld) return null
+
+  const appliedTimes = proposals.map(p => toTime(p.appliedAt)).filter((t): t is number => t !== null)
+  const interviewTimes = proposals
+    .filter(p => isFirstInterviewHeld(p))
+    .map(p => toTime(p.interviewDate))
+    .filter((t): t is number => t !== null)
+
+  const lt = buildLeadTime({
+    firstMeetingAt,
+    appliedAt: appliedTimes.length > 0 ? new Date(Math.min(...appliedTimes)) : null,
+    firstInterviewAt: interviewTimes.length > 0 ? new Date(Math.min(...interviewTimes)) : null,
+    trackPending: DOC_SUBMIT_PENDING_STATUSES.includes(customer.status),
+  })
+
+  const badge = (text: string, tone: 'ok' | 'alert' | 'muted') => (
+    <span className={cn('px-1.5 py-0.5 rounded text-[11px] font-medium',
+      tone === 'alert' ? 'bg-red-100 text-red-700' : tone === 'ok' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-400')}>
+      {text}
+    </span>
+  )
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
+      <span className="font-medium text-gray-500">リードタイム</span>
+      <span>初回面談 <span className="text-gray-800">{fmt(lt.firstMeetingAt)}</span></span>
+      <span className="text-gray-300">→</span>
+      <span className="flex items-center gap-1">
+        書類提出 <span className="text-gray-800">{lt.appliedAt ? fmt(lt.appliedAt) : '未提出'}</span>
+        {lt.docBusinessDays !== null
+          ? badge(lt.docPending ? `${lt.docBusinessDays}営業日経過` : `${lt.docBusinessDays}営業日`, lt.docAlert ? 'alert' : 'ok')
+          : null}
+        {lt.docAlert && <span className="text-red-600 font-medium">（{DOC_SUBMIT_ALERT_BUSINESS_DAYS}営業日以上）</span>}
+      </span>
+      <span className="text-gray-300">→</span>
+      <span className="flex items-center gap-1">
+        一次面接 <span className="text-gray-800">{lt.firstInterviewAt ? fmt(lt.firstInterviewAt) : '未実施'}</span>
+        {lt.interviewDays !== null ? badge(`${lt.interviewDays}日`, 'ok') : null}
+      </span>
+    </div>
+  )
 }
 
 function historyIcon(type: string | null | undefined) {
@@ -1135,6 +1200,8 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
             </div>
           </div>
         )}
+
+        <LeadTimeSummary customer={customer} meetings={meetings} proposals={proposals} />
       </div>
 
       {/* Two-column layout */}

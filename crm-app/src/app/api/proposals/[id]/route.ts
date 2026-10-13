@@ -16,6 +16,9 @@ export async function PATCH(
     const data: any = { ...body }
     if (body.interviewDate === '') data.interviewDate = null
     if (body.interviewDate && typeof body.interviewDate === 'string') data.interviewDate = new Date(body.interviewDate)
+    // 応募日（書類提出日）。空文字で解除。ステータス変更時の自動記録は db.updateProposal 側で行う
+    if (body.appliedAt === '') data.appliedAt = null
+    if (body.appliedAt && typeof body.appliedAt === 'string') data.appliedAt = new Date(body.appliedAt)
     // 内定以降に到達したら決着日を記録（未到達に戻ったらクリア）
     if (typeof body.status === 'string') {
       data.decidedAt = [...PROPOSAL_OFFER_STATUSES, '辞退', '見送り'].includes(body.status)

@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { format, startOfToday, startOfWeek, endOfWeek, addDays } from 'date-fns'
-import { Users, AlertCircle, Calendar, Clock } from 'lucide-react'
+import { Users, AlertCircle, Calendar, Clock, FileWarning } from 'lucide-react'
 import type { DashboardStats, DashboardYomiCustomer } from '@/types'
 import { ALL_STATUSES } from '@/types'
-import { CA_OPTIONS } from '@/lib/constants'
+import { CA_OPTIONS, DOC_SUBMIT_ALERT_BUSINESS_DAYS } from '@/lib/constants'
 import { statusColors } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
@@ -123,6 +123,7 @@ export function DashboardClient() {
 
   // Cancelled meetings in the last 7 days
   const recentCancelled = stats.recentCancelled
+  const docSubmitAlerts = stats.docSubmitAlerts ?? []
 
   // Status funnel（ALL_STATUSES の順に並べる）
   const statusCountMap = new Map(stats.statusCounts.map(x => [x.status, x.count]))
@@ -244,6 +245,37 @@ export function DashboardClient() {
                   </a>
                   {m.ca && <span className="text-gray-400 text-xs">{m.ca}</span>}
                   <span className="ml-auto text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">キャンセル</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 書類提出遅れアラート */}
+      {docSubmitAlerts.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+          <h2 className="font-bold text-amber-800 mb-1 flex items-center gap-2">
+            <FileWarning size={18} className="text-amber-500" />
+            書類提出が遅れている求職者（{docSubmitAlerts.length}人）
+          </h2>
+          <p className="text-xs text-amber-700/80 mb-3">
+            初回面談から{DOC_SUBMIT_ALERT_BUSINESS_DAYS}営業日以上たっても、まだどの求人にも応募（書類提出）していない求職者です。提案求人のステータスを「応募」にするか応募日を入力すると消えます。
+          </p>
+          <div className="space-y-2">
+            {docSubmitAlerts.map((c) => {
+              const dateStr = (() => { try { return format(new Date(c.firstMeetingAt as unknown as string), 'M/d') } catch { return '—' } })()
+              return (
+                <div key={c.id} className="flex items-center gap-3 text-sm bg-white rounded-lg px-3 py-2 shadow-sm flex-wrap">
+                  <span className="text-gray-400 shrink-0 text-xs">初回面談 {dateStr}</span>
+                  <a href={`/customers/${c.id}`} className="font-medium text-blue-600 hover:underline">
+                    {c.name}
+                  </a>
+                  {c.ca && <span className="text-gray-400 text-xs">{c.ca}</span>}
+                  <span className="text-gray-400 text-xs">{c.status}</span>
+                  <span className="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                    {c.businessDays}営業日経過・未提出
+                  </span>
                 </div>
               )
             })}

@@ -183,6 +183,7 @@ export async function ensureSchema() {
       "ca" TEXT,
       "status" TEXT NOT NULL DEFAULT '提案',
       "proposedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "appliedAt" TIMESTAMP(3),
       "interviewDate" TIMESTAMP(3),
       "decidedAt" TIMESTAMP(3),
       "note" TEXT,
@@ -192,6 +193,7 @@ export async function ensureSchema() {
     )
   `
   await prisma.$executeRaw`ALTER TABLE "JobProposal" ADD COLUMN IF NOT EXISTS "interviewDate" TIMESTAMP(3)`
+  await prisma.$executeRaw`ALTER TABLE "JobProposal" ADD COLUMN IF NOT EXISTS "appliedAt" TIMESTAMP(3)`
   await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "JobProposal_customerId_idx" ON "JobProposal"("customerId")`
   await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "JobProposal_jobId_idx" ON "JobProposal"("jobId")`
   await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "JobProposal_proposedAt_idx" ON "JobProposal"("proposedAt")`

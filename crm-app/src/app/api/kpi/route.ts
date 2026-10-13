@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 import { type NextRequest } from 'next/server'
 import { getAppSession } from '@/lib/session'
-import { getKpi } from '@/lib/db'
+import { getKpi, getKpiLeadTimes } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   const session = await getAppSession()
@@ -13,8 +13,8 @@ export async function GET(request: NextRequest) {
     if (!/^\d{4}-\d{2}$/.test(month)) {
       return Response.json({ error: 'monthはYYYY-MM形式で指定してください' }, { status: 400 })
     }
-    const rows = await getKpi(month)
-    return Response.json({ month, rows })
+    const [rows, leadTimes] = await Promise.all([getKpi(month), getKpiLeadTimes(month)])
+    return Response.json({ month, rows, leadTimes })
   } catch (e) {
     console.error(e)
     return Response.json({ error: 'Failed to compute KPI' }, { status: 500 })
