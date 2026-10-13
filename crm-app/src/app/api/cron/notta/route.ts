@@ -4,12 +4,12 @@ import { normalizeCa } from '@/lib/ca'
 import { markInterviewHeld } from '@/lib/db'
 import { listNottaDocs, exportDocText } from '@/lib/googleDrive'
 import {
-  extractDocSummary,
   generateMinutes,
   guessNameFromFileName,
   loadCustomerIndex,
   matchCustomerDetailed,
 } from '@/lib/meetingMinutes'
+import { isDetailedMinutes } from '@/lib/minutesFormat'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -24,21 +24,25 @@ export const maxDuration = 300 // 秒
  * Nottaフォルダの未処理Googleドキュメントを走査し、対応する顧客の
  * 対応履歴（History, type=議事録）に追加します。
  *
- * 記録する本文は、ドキュメントに記載されている要約セクション（AI要約）を
- * そのまま使用します。要約が無いドキュメント（文字起こしのみ）の場合のみ、
- * 従来どおり文字起こしからAIで議事録を生成します。
+ * 記録する本文は、ドキュメントの文字起こしからAIで生成した詳細議事録です
+ * （フォーマットは src/lib/minutesFormat.ts と docs/meeting-minutes-format.md）。
+ * Nottaの要約（AI要約）は話題の抜け漏れ確認の参考として渡すだけで、
+ * そのまま記録することはありません。文字起こしが無く要約だけのドキュメントは、
+ * 要約の内容を落とさずに同じフォーマットへ整形します。
  *
  * 動作確認用のモード（どちらもDBには一切書き込みません）:
  *   ?dry=1 … Driveのファイル一覧だけを返す
  *   ?dry=2 … ファイル名から推定した顧客名と、CRMとの照合結果だけを返す
  *            （文字起こしの取得もAI生成も行わないので速く、費用もかかりません）
  *
- * 過去分の修正モード（以前の実行で文字起こしのまま記録された履歴を直します）:
- *   ?rewrite=dry … 上書き対象の一覧だけを返す（書き込みなし）
- *   ?rewrite=1  … 実際に上書きする
- * ドキュメントに要約があればそれで上書き。要約が無い場合は、本文が
- * 文字起こしのまま（## 面談メモ）の履歴に限り、AIで議事録を生成して
- * 上書きします。整形済みの履歴はそのまま残します。
+ * 過去分の修正モード（以前の実行でNottaの要約のまま・文字起こしのまま記録された
+ * 履歴を、新フォーマットの詳細議事録で作り直します）:
+ *   ?rewrite=dry … 作り直す対象の一覧だけを返す（書き込みなし）
+ *   ?rewrite=1  … 実際に作り直して上書きする
+ *   &since=YYYY-MM-DD … 対応日がこの日以降の履歴だけを対象にする（省略時は全件）
+ * 本文が新フォーマット（## 面談概要 で始まる）の履歴は対象外です。
+ * 1件ごとにAI生成が走るため、時間制限で途中終了したら再実行してください
+ * （作り直し済みの履歴は次回スキップされます）。新しい面談から順に処理します。
  *
  * 二重登録の防止は、履歴本文の末尾に埋め込む `#src:<fileId>` マーカーで行うため、
  * DBのテーブル追加は不要です。
@@ -116,15 +120,26 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // 過去の実行で文字起こしベースの議事録が記録された履歴を、
-  // ドキュメント記載の要約で上書きする。
+  // 過去の実行でNottaの要約のまま（または文字起こしのまま）記録された履歴を、
+  // 新フォーマットの詳細議事録で作り直す。
   const rewrite = req.nextUrl.searchParams.get('rewrite') || ''
   if (rewrite === '1' || rewrite === 'dry') {
     const apply = rewrite === '1'
+    const sinceParam = req.nextUrl.searchParams.get('since') || ''
+    const since = sinceParam ? new Date(sinceParam) : null
+    if (since && Number.isNaN(since.getTime())) {
+      return NextResponse.json({ error: 'since は YYYY-MM-DD 形式で指定してください' }, { status: 400 })
+    }
+
     const nameById = new Map(docs.map((d) => [d.id, d.name]))
     const histories = await prisma.history.findMany({
-      where: { createdBy: 'Notta自動連携' },
-      select: { id: true, content: true, name: true },
+      where: {
+        createdBy: 'Notta自動連携',
+        content: { contains: '#src:' },
+        ...(since ? { date: { gte: since } } : {}),
+      },
+      select: { id: true, content: true, name: true, date: true },
+      orderBy: { date: 'desc' },
     })
 
     let updated = 0
@@ -133,83 +148,73 @@ export async function GET(req: NextRequest) {
     let errored = 0
     let timeLimited = false
     const details: any[] = []
-    // 同じドキュメントを2回取得しないよう、本文をキャッシュする
-    const textCache = new Map<string, string>()
 
     for (const h of histories) {
       const m = (h.content || '').match(/#src:([A-Za-z0-9_-]+)/)
       if (!m) continue
       const fileId = m[1]
       const file = nameById.get(fileId) || fileId
+      const date = h.date ? new Date(h.date).toISOString().slice(0, 10) : ''
 
-      if (timeLeft() < 25_000) {
+      // マーカーを除いた現在の本文
+      const current = (h.content || '')
+        .replace(/<!--\s*#src:[A-Za-z0-9_-]+\s*-->/g, '')
+        .trim()
+
+      if (isDetailedMinutes(current)) {
+        alreadyOk++
+        continue
+      }
+
+      if (!apply) {
+        updated++
+        details.push({ file, customer: h.name, date, 現在の文字数: current.length, updated: false })
+        continue
+      }
+
+      if (!process.env.ANTHROPIC_API_KEY) {
+        skippedCount++
+        details.push({ file, customer: h.name, date, skipped: 'ANTHROPIC_API_KEY が未設定のため議事録を生成できません' })
+        continue
+      }
+
+      // AI生成は1件あたり1分前後かかるため、余裕を持って打ち切る
+      if (timeLeft() < 90_000) {
         timeLimited = true
         break
       }
 
       try {
-        let text = textCache.get(fileId)
-        if (text === undefined) {
-          text = await exportDocText(fileId)
-          textCache.set(fileId, text)
-        }
-        const summary = extractDocSummary(text)
-
-        // マーカーを除いた現在の本文
-        const current = (h.content || '')
-          .replace(/<!--\s*#src:[A-Za-z0-9_-]+\s*-->/g, '')
-          .trim()
-
-        if (summary) {
-          // ドキュメントに要約がある → それをそのまま記録
-          if (current === summary) {
-            alreadyOk++
-            details.push({ file, customer: h.name, skipped: 'すでに要約が記録されています' })
-            continue
-          }
-          if (apply) {
-            await prisma.history.update({
-              where: { id: h.id },
-              data: { content: `${summary}\n\n<!-- #src:${fileId} -->` },
-            })
-          }
-          updated++
-          details.push({ file, customer: h.name, updated: apply, source: '要約' })
-          continue
-        }
-
-        // ドキュメントに要約が無い場合。本文が文字起こしのまま残っている
-        // 履歴（## 面談メモ で始まる）だけ、AIで議事録を生成して上書きする。
-        const isRawTranscript = /^##\s*面談メモ/.test(current)
-        if (!isRawTranscript) {
-          alreadyOk++
-          details.push({ file, customer: h.name, skipped: 'ドキュメントに要約が無く、本文は整形済みのため変更しません' })
-          continue
-        }
-        if (!process.env.ANTHROPIC_API_KEY) {
+        const text = await exportDocText(fileId)
+        if (!text.trim()) {
           skippedCount++
-          details.push({ file, customer: h.name, skipped: 'ANTHROPIC_API_KEY が未設定のためAI議事録を生成できません' })
+          details.push({ file, customer: h.name, date, skipped: '本文が空' })
           continue
         }
-        if (apply) {
-          const ex = await generateMinutes(file, text)
-          await prisma.history.update({
-            where: { id: h.id },
-            data: { content: `${ex.minutes}\n\n<!-- #src:${fileId} -->` },
-          })
-        }
+        const ex = await generateMinutes(file, text)
+        await prisma.history.update({
+          where: { id: h.id },
+          data: { content: `${ex.minutes}\n\n<!-- #src:${fileId} -->` },
+        })
         updated++
-        details.push({ file, customer: h.name, updated: apply, source: 'AI生成議事録' })
+        details.push({
+          file,
+          customer: h.name,
+          date,
+          updated: true,
+          source: ex.source,
+          文字数: `${current.length} → ${ex.minutes.length}`,
+        })
       } catch (e: any) {
         errored++
-        details.push({ file, customer: h.name, error: String(e?.message || e).slice(0, 500) })
+        details.push({ file, customer: h.name, date, error: String(e?.message || e).slice(0, 500) })
       }
     }
 
     return NextResponse.json({
       status: apply ? (timeLimited ? 'rewrite-partial' : 'rewrite') : 'rewrite-dry',
       対象履歴: histories.length,
-      updated,
+      [apply ? 'updated' : '作り直し対象']: updated,
       alreadyOk,
       skipped: skippedCount,
       errored,
@@ -277,7 +282,8 @@ export async function GET(req: NextRequest) {
   let timeLimited = false
 
   for (const t of targets) {
-    if (timeLeft() < 25_000) {
+    // 詳細議事録のAI生成は1件あたり1分前後かかるため、余裕を持って打ち切る
+    if (timeLeft() < 90_000) {
       timeLimited = true
       break
     }
@@ -295,13 +301,10 @@ export async function GET(req: NextRequest) {
         continue
       }
 
-      // ドキュメントに要約が記載されていればそれを記録する。
-      // AI生成は氏名・連絡先・次回アクションなどの抽出のために使う。
-      const summary = extractDocSummary(text)
-      const ex = await generateMinutes(doc.name, summary || text, summary ? '要約' : '文字起こし')
-      if (summary) {
-        ex.minutes = summary
-      }
+      // 文字起こしから詳細議事録を生成する（Nottaの要約は参考情報として渡す）。
+      // 以前はここでNottaの要約をそのまま本文にしていたため、議事録が数行の
+      // 要約だけになっていた。
+      const ex = await generateMinutes(doc.name, text)
 
       // ファイル名に氏名が無かった場合（「Google Meetからの新しいノート」など）は、
       // 本文から拾った氏名・メール・電話で照合する。
@@ -357,7 +360,7 @@ export async function GET(req: NextRequest) {
         matched: true,
         customer: customer.name,
         by,
-        source: summary ? '要約' : '文字起こし',
+        source: ex.source,
       })
     } catch (e: any) {
       errored++
