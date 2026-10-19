@@ -49,9 +49,14 @@ function buildLines(r: KpiRow): MetricLine[] {
   ]
 }
 
+// KPI行の合計値（0ならその期間にデータが無い）
+function rowTotal(r: KpiRow): number {
+  return buildLines(r).reduce((sum, l) => sum + l.value, 0)
+}
+
 function CaCard({ row }: { row: KpiRow }) {
   const lines = buildLines(row)
-  const total = lines.reduce((sum, l) => sum + l.value, 0)
+  const total = rowTotal(row)
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
       <div className="px-4 py-2.5 border-b border-gray-100 font-bold text-gray-800">{row.ca}</div>
@@ -195,6 +200,9 @@ export function KpiClient() {
 
   useEffect(() => { fetchKpi() }, [fetchKpi])
 
+  // データが1件も無いCAはカードを出さない（全体の合計には影響しない）
+  const activeRows = rows.filter(r => rowTotal(r) > 0)
+
   // 全CA合計
   const totals = rows.reduce<KpiRow>(
     (acc, r) => ({
@@ -256,9 +264,13 @@ export function KpiClient() {
       ) : (
         <>
           <CaCard row={totals} />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {rows.map(r => <CaCard key={r.ca} row={r} />)}
-          </div>
+          {activeRows.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm px-4 py-6 text-center text-sm text-gray-300">この期間にデータのあるCAはいません</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {activeRows.map(r => <CaCard key={r.ca} row={r} />)}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-xs text-gray-400 pt-2">
             <FileWarning size={14} className="text-amber-500" />
             書類提出が遅れている求職者は、ダッシュボードにも「書類提出が遅れている求職者」として表示されます。
