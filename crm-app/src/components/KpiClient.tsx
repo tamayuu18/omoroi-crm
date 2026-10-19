@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { BarChart3, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { KpiRow, KpiLeadTimeRow } from '@/types'
 import { DOC_SUBMIT_ALERT_BUSINESS_DAYS } from '@/lib/constants'
@@ -49,12 +49,32 @@ function buildLines(r: KpiRow): MetricLine[] {
   ]
 }
 
-function CaCard({ row }: { row: KpiRow }) {
+// KPI行の合計値（0ならその期間にデータが無い）
+function rowTotal(r: KpiRow): number {
+  return buildLines(r).reduce((sum, l) => sum + l.value, 0)
+}
+
+// CA別カード。見出しをクリックすると明細を畳める（アコーディオン）
+function CaCard({ row, defaultOpen = true }: { row: KpiRow; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   const lines = buildLines(row)
-  const total = lines.reduce((sum, l) => sum + l.value, 0)
+  const total = rowTotal(row)
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-gray-100 font-bold text-gray-800">{row.ca}</div>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        className={cn('w-full px-4 py-2.5 flex items-center justify-between gap-2 text-left font-bold text-gray-800 hover:bg-gray-50',
+          open && 'border-b border-gray-100')}>
+        <span className="flex items-center gap-2">
+          {row.ca}
+          {!open && (
+            <span className="text-xs font-normal text-gray-400">
+              面談設定{row.meetingsSet}人 / 初回面談{row.firstMeetings}人 / 内定承諾{row.accepted}人
+            </span>
+          )}
+        </span>
+        <ChevronDown size={16} className={cn('text-gray-400 shrink-0 transition-transform', !open && '-rotate-90')} />
+      </button>
+      {open && (<>
       <table className="w-full text-sm">
         <tbody>
           {lines.map(l => (
@@ -74,6 +94,7 @@ function CaCard({ row }: { row: KpiRow }) {
         </tbody>
       </table>
       {total === 0 && <div className="px-4 py-2 text-xs text-gray-300">この期間のデータはありません</div>}
+      </>)}
     </div>
   )
 }
@@ -195,6 +216,9 @@ export function KpiClient() {
 
   useEffect(() => { fetchKpi() }, [fetchKpi])
 
+  // データが1件も無いCAはカードを出さない（全体の合計には影響しない）
+  const activeRows = rows.filter(r => rowTotal(r) > 0)
+
   // 全CA合計
   const totals = rows.reduce<KpiRow>(
     (acc, r) => ({
@@ -256,9 +280,13 @@ export function KpiClient() {
       ) : (
         <>
           <CaCard row={totals} />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {rows.map(r => <CaCard key={r.ca} row={r} />)}
-          </div>
+          {activeRows.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm px-4 py-6 text-center text-sm text-gray-300">この期間にデータのあるCAはいません</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {activeRows.map(r => <CaCard key={r.ca} row={r} />)}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-xs text-gray-400 pt-2">
             <FileWarning size={14} className="text-amber-500" />
             書類提出が遅れている求職者は、ダッシュボードにも「書類提出が遅れている求職者」として表示されます。
