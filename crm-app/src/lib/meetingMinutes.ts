@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { MINUTES_RULES, MINUTES_TEMPLATE } from '@/lib/minutesFormat'
 
 export type Extracted = {
   personName: string
@@ -9,6 +10,7 @@ export type Extracted = {
   result?: string        // 面談結果の1〜2文サマリ
   nextAction?: string    // 次回アクション
   nextDeadline?: string  // 次回期日 'YYYY-MM-DD'（無ければ ''）
+  source?: '文字起こし' | '要約'  // 議事録の元にした本文の種別
 }
 
 // 使用モデルは環境変数で変更可能。現行のモデルIDに合わせて設定してください。
@@ -104,7 +106,7 @@ export function guessNameFromFileName(fileName: string): string {
  *     発言者 1 00:00
  *     …
  *
- * 対応履歴には文字起こしではなく、この要約セクションをそのまま記録します。
+ * 議事録は文字起こしから生成し、この要約は話題の抜け漏れ確認の参考に使います。
  * ------------------------------------------------------------------ */
 
 /** 要約セクションの見出し */
@@ -123,27 +125,68 @@ function isTimestampLine(line: string): boolean {
   )
 }
 
+/** 「文字起こし」セクションの見出し（チャプターは含まない） */
+const TRANSCRIPT_ONLY_HEADING =
+  /^(文字起こし(記録)?|トランスクリプト|会話記録|全文(文字起こし)?|Transcript(ion)?)\s*[:：]?\s*$/i
+
+/** 文字起こしとして扱う最低文字数。これ未満なら「文字起こしなし」とみなす */
+const MIN_TRANSCRIPT_CHARS = 300
+
+export type NottaDocParts = {
+  /** ドキュメント記載の要約（AI要約）。無ければ '' */
+  summary: string
+  /** 文字起こし本文。無ければ '' */
+  transcript: string
+}
+
+/**
+ * Nottaドキュメントの本文を「要約」と「文字起こし」に分ける。
+ *
+ * - 要約: 要約見出しから、チャプター／文字起こしの見出しまたは最初のタイムスタンプ行まで
+ * - 文字起こし: 「文字起こし」見出し以降。見出しが無ければ要約セクションの後ろ全部。
+ *   要約も見出しも無いドキュメントは全文を文字起こしとして扱う。
+ */
+export function splitNottaDoc(docText: string): NottaDocParts {
+  const lines = docText.split(/\r?\n/)
+
+  let summary = ''
+  let summaryEnd = -1
+  const start = lines.findIndex((l) => SUMMARY_HEADING.test(l.trim()))
+  if (start !== -1) {
+    const body: string[] = []
+    let i = start + 1
+    for (; i < lines.length; i++) {
+      const t = lines[i].trim()
+      if (TRANSCRIPT_HEADING.test(t)) break
+      if (t && isTimestampLine(lines[i])) break
+      body.push(lines[i])
+    }
+    summaryEnd = i
+    const s = body.join('\n').trim()
+    // 見出しだけで中身が無いケースは「要約なし」として扱う
+    summary = s.length >= 20 ? s : ''
+  }
+
+  let transcript = ''
+  const tIdx = lines.findIndex((l) => TRANSCRIPT_ONLY_HEADING.test(l.trim()))
+  if (tIdx !== -1) {
+    transcript = lines.slice(tIdx + 1).join('\n').trim()
+  } else if (summaryEnd !== -1) {
+    transcript = lines.slice(summaryEnd).join('\n').trim()
+  } else {
+    transcript = docText.trim()
+  }
+  if (transcript.length < MIN_TRANSCRIPT_CHARS) transcript = ''
+
+  return { summary, transcript }
+}
+
 /**
  * ドキュメント本文から、記載されている要約セクションをそのまま抜き出す。
  * 要約が見つからない（文字起こしのみのドキュメント）場合は '' を返す。
  */
 export function extractDocSummary(docText: string): string {
-  const lines = docText.split(/\r?\n/)
-  const start = lines.findIndex((l) => SUMMARY_HEADING.test(l.trim()))
-  if (start === -1) return ''
-
-  const body: string[] = []
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i]
-    const t = line.trim()
-    if (TRANSCRIPT_HEADING.test(t)) break
-    if (t && isTimestampLine(line)) break
-    body.push(line)
-  }
-
-  const summary = body.join('\n').trim()
-  // 見出しだけで中身が無いケースは「要約なし」として扱う
-  return summary.length >= 20 ? summary : ''
+  return splitNottaDoc(docText).summary
 }
 
 /* ------------------------------------------------------------------ *
@@ -271,67 +314,130 @@ export async function matchCustomer(ex: Extracted, fileName: string, index?: Ind
 
 /* ------------------------------------------------------------------ *
  * 議事録生成
+ *
+ * 出力は「議事録本文（markdown）」＋ 末尾の ```json メタデータ の2部構成。
+ * 長い本文をJSON文字列に押し込むとエスケープ崩れで解析に失敗しやすいため、
+ * 本文はそのまま書かせ、氏名・連絡先・次回アクションだけをJSONで受け取る。
  * ------------------------------------------------------------------ */
 
-function extractJson(text: string): any {
-  // ```json ... ``` やそのまま {...} を許容
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const raw = fenced ? fenced[1] : text
-  const start = raw.indexOf('{')
-  const end = raw.lastIndexOf('}')
-  if (start === -1 || end === -1) throw new Error('LLM応答からJSONを抽出できませんでした')
-  return JSON.parse(raw.slice(start, end + 1))
+/** 文字起こしをAIに渡す上限文字数（環境変数で変更可） */
+const MAX_INPUT_CHARS = Number(process.env.MINUTES_MAX_INPUT_CHARS || 150_000)
+
+/** 議事録本文の出力上限トークン。詳細議事録（数千字）が収まる余裕を持たせる */
+const MAX_OUTPUT_TOKENS = Number(process.env.MINUTES_MAX_OUTPUT_TOKENS || 8000)
+
+type Meta = {
+  personName?: string
+  kana?: string
+  email?: string
+  phone?: string
+  result?: string
+  nextAction?: string
+  nextDeadline?: string
+}
+
+/** 応答末尾の ```json ... ``` を取り出し、本文とメタデータに分ける */
+function splitMinutesAndMeta(out: string): { minutes: string; meta: Meta } {
+  const re = /```json\s*([\s\S]*?)```\s*$/i
+  const m = out.match(re)
+  if (!m) return { minutes: out.trim(), meta: {} }
+  let meta: Meta = {}
+  try {
+    meta = JSON.parse(m[1])
+  } catch {
+    // メタデータが壊れていても本文は使う
+  }
+  return { minutes: out.slice(0, m.index).trim(), meta }
+}
+
+/** 文字起こし本文のうち、AIに渡す部分を返す（長すぎる場合は先頭を使用） */
+function clip(text: string): { text: string; clipped: boolean } {
+  if (text.length <= MAX_INPUT_CHARS) return { text, clipped: false }
+  return { text: text.slice(0, MAX_INPUT_CHARS), clipped: true }
 }
 
 /**
- * 面談の本文（文字起こし、またはドキュメント記載の要約）から
- * 議事録と氏名・連絡先を生成。
- * ANTHROPIC_API_KEY が無い場合は、素の本文を整形したフォールバックを返す。
+ * Nottaドキュメントの本文（要約＋文字起こし）から、詳細議事録と氏名・連絡先を生成する。
+ *
+ * - 文字起こしがあればそれを元に作成する（Nottaの要約は参考情報として添える）
+ * - 文字起こしが無く要約だけのドキュメントは、要約の内容を落とさずに整形する
+ * - ANTHROPIC_API_KEY が無い場合は、本文を整形せずそのまま返す
  */
-export async function generateMinutes(
-  fileName: string,
-  body: string,
-  sourceKind: '文字起こし' | '要約' = '文字起こし'
-): Promise<Extracted> {
+export async function generateMinutes(fileName: string, docText: string): Promise<Extracted> {
   const apiKey = process.env.ANTHROPIC_API_KEY
-  const text = body.slice(0, 40000) // 長すぎる場合は先頭を使用
+  const parts = splitNottaDoc(docText)
+  const source: Extracted['source'] = parts.transcript ? '文字起こし' : parts.summary ? '要約' : '文字起こし'
+  const primary = clip(parts.transcript || parts.summary || docText)
 
   if (!apiKey) {
     return {
       personName: guessNameFromFileName(fileName),
-      minutes: `## 面談メモ（自動整形なし）\n\n> ANTHROPIC_API_KEY 未設定のため、${sourceKind}をそのまま記録しています。\n\n**ファイル**: ${fileName}\n\n${text}`,
+      minutes: `## 面談メモ（自動整形なし）\n\n> ANTHROPIC_API_KEY 未設定のため、${source}をそのまま記録しています。\n\n**ファイル**: ${fileName}\n\n${primary.text}`,
+      source,
     }
   }
 
   const system = [
-    'あなたは人材紹介会社（キャリアアドバイザー）向けの議事録作成アシスタントです。',
-    `面談の${sourceKind}から、簡潔で実務に使える議事録を作成します。`,
-    '出力は必ず指定のJSONのみ。前後の説明文やコードフェンスは付けないでください。',
-  ].join('\n')
-
-  const userPrompt = [
-    `以下はキャリア面談の${sourceKind}です。ファイル名: ${fileName}`,
+    'あなたは人材紹介会社のキャリアアドバイザー（CA）向けの議事録作成アシスタントです。',
+    'キャリア面談の文字起こしから、CAが後日そのまま業務に使える「詳細な議事録」を作成します。',
+    '議事録は要約ではなく記録です。短くまとめることより、面談で出た情報を漏らさず残すことを優先してください。',
     '',
-    `--- ${sourceKind}ここから ---`,
-    text,
-    `--- ${sourceKind}ここまで ---`,
+    '# 書き方のルール',
+    ...MINUTES_RULES.map((r) => `- ${r}`),
     '',
-    '注意: 面談にはキャリアアドバイザー（自社の担当者）と求職者が参加しています。',
-    'personName には「求職者（お客様）」の氏名を入れてください。アドバイザー側の氏名ではありません。',
-    'ファイル名は「アドバイザー名 面談: 求職者名様」または「アドバイザー名/求職者名さん用件」の形式です。',
+    '# 議事録の雛形（この見出し構成・順番をそのまま使う）',
+    MINUTES_TEMPLATE,
     '',
-    '次のJSON形式で出力してください（値が不明な項目は空文字 "" にする）:',
+    '# 出力形式',
+    '1. まず議事録本文を markdown で出力する（雛形の見出し構成）。',
+    '2. 本文の後に、次のメタデータを ```json コードブロックで1つだけ出力する。',
+    '```json',
     '{',
-    '  "personName": "面談対象者（求職者）の氏名",',
-    '  "kana": "ふりがな",',
+    '  "personName": "求職者の氏名",',
+    '  "kana": "ふりがな（分かれば）",',
     '  "email": "メールアドレス（文中にあれば）",',
     '  "phone": "電話番号（文中にあれば）",',
-    '  "minutes": "議事録本文。markdownで ## 要約 / ## 決定事項 / ## ToDo / ## 懸念・特記 の見出しを付ける",',
     '  "result": "面談結果の1〜2文サマリ",',
     '  "nextAction": "次回アクション（無ければ空）",',
     '  "nextDeadline": "次回期日 YYYY-MM-DD（無ければ空）"',
     '}',
+    '```',
+    '値が不明な項目は空文字 "" にする。本文・メタデータ以外の前置きや説明文は出力しない。',
   ].join('\n')
+
+  const user: string[] = [`ファイル名: ${fileName}`, '']
+  user.push(
+    '面談にはキャリアアドバイザー（自社の担当者）と求職者が参加しています。',
+    'personName には「求職者（お客様）」の氏名を入れてください。アドバイザー側の氏名ではありません。',
+    'ファイル名は「アドバイザー名 面談: 求職者名様」または「アドバイザー名/求職者名さん用件」の形式です。',
+    ''
+  )
+
+  if (source === '文字起こし') {
+    if (parts.summary) {
+      user.push(
+        'Nottaが自動生成した要約です。話題の抜け漏れチェックの参考にしてください（この要約の粒度に合わせて短くしないこと）。',
+        '--- Notta要約ここから ---',
+        parts.summary,
+        '--- Notta要約ここまで ---',
+        ''
+      )
+    }
+    user.push(
+      `面談の文字起こしです${primary.clipped ? `（長いため先頭${MAX_INPUT_CHARS}文字のみ）` : ''}。これを元に詳細議事録を作成してください。`,
+      '--- 文字起こしここから ---',
+      primary.text,
+      '--- 文字起こしここまで ---'
+    )
+  } else {
+    user.push(
+      'このドキュメントには文字起こしが無く、Nottaの要約だけが記載されています。',
+      '要約に書かれている情報をひとつも落とさずに雛形へ整理してください。要約に無い情報は推測で補わず、該当見出しは「特になし」にします。',
+      '--- Notta要約ここから ---',
+      primary.text,
+      '--- Notta要約ここまで ---'
+    )
+  }
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -342,9 +448,9 @@ export async function generateMinutes(
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 2500,
+      max_tokens: MAX_OUTPUT_TOKENS,
       system,
-      messages: [{ role: 'user', content: userPrompt }],
+      messages: [{ role: 'user', content: user.join('\n') }],
     }),
   })
 
@@ -352,17 +458,31 @@ export async function generateMinutes(
     throw new Error(`Anthropic API error: ${res.status} ${await res.text()}`)
   }
   const data = await res.json()
-  const out = (data?.content?.[0]?.text || '').trim()
-  const json = extractJson(out)
+  const blocks: { type?: string; text?: string }[] = Array.isArray(data?.content) ? data.content : []
+  const out = blocks
+    .filter((b) => b?.type === 'text')
+    .map((b) => b.text || '')
+    .join('')
+    .trim()
+  if (data?.stop_reason === 'max_tokens') {
+    console.warn(`[meetingMinutes] 出力が上限（${MAX_OUTPUT_TOKENS}トークン）に達しました: ${fileName}`)
+  }
+
+  const { minutes: body, meta } = splitMinutesAndMeta(out)
+  let minutes = body || `## 面談メモ\n\n${primary.text.slice(0, 4000)}`
+  if (source === '要約') {
+    minutes += '\n\n> ※ このドキュメントには文字起こしが無いため、Nottaの要約をもとに作成しています。'
+  }
 
   return {
-    personName: String(json.personName || '').trim() || guessNameFromFileName(fileName),
-    kana: json.kana || '',
-    email: json.email || '',
-    phone: json.phone || '',
-    minutes: String(json.minutes || '').trim() || `## 面談メモ\n\n${text.slice(0, 4000)}`,
-    result: json.result || '',
-    nextAction: json.nextAction || '',
-    nextDeadline: (json.nextDeadline || '').trim(),
+    personName: String(meta.personName || '').trim() || guessNameFromFileName(fileName),
+    kana: meta.kana || '',
+    email: meta.email || '',
+    phone: meta.phone || '',
+    minutes,
+    result: meta.result || '',
+    nextAction: meta.nextAction || '',
+    nextDeadline: String(meta.nextDeadline || '').trim(),
+    source,
   }
 }
