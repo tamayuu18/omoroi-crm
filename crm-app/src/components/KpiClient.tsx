@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react'
+import { BarChart3, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { KpiRow, KpiLeadTimeRow } from '@/types'
 import { DOC_SUBMIT_ALERT_BUSINESS_DAYS } from '@/lib/constants'
@@ -54,27 +54,12 @@ function rowTotal(r: KpiRow): number {
   return buildLines(r).reduce((sum, l) => sum + l.value, 0)
 }
 
-// CA別カード。見出しをクリックすると明細を畳める（アコーディオン）
-function CaCard({ row, defaultOpen = true }: { row: KpiRow; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
+function CaCard({ row }: { row: KpiRow }) {
   const lines = buildLines(row)
   const total = rowTotal(row)
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        className={cn('w-full px-4 py-2.5 flex items-center justify-between gap-2 text-left font-bold text-gray-800 hover:bg-gray-50',
-          open && 'border-b border-gray-100')}>
-        <span className="flex items-center gap-2">
-          {row.ca}
-          {!open && (
-            <span className="text-xs font-normal text-gray-400">
-              面談設定{row.meetingsSet}人 / 初回面談{row.firstMeetings}人 / 内定承諾{row.accepted}人
-            </span>
-          )}
-        </span>
-        <ChevronDown size={16} className={cn('text-gray-400 shrink-0 transition-transform', !open && '-rotate-90')} />
-      </button>
-      {open && (<>
+      <div className="px-4 py-2.5 border-b border-gray-100 font-bold text-gray-800">{row.ca}</div>
       <table className="w-full text-sm">
         <tbody>
           {lines.map(l => (
@@ -94,7 +79,6 @@ function CaCard({ row, defaultOpen = true }: { row: KpiRow; defaultOpen?: boolea
         </tbody>
       </table>
       {total === 0 && <div className="px-4 py-2 text-xs text-gray-300">この期間のデータはありません</div>}
-      </>)}
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { format, startOfToday, startOfWeek, endOfWeek, addDays } from 'date-fns'
-import { Users, AlertCircle, Calendar, Clock, FileWarning } from 'lucide-react'
+import { Users, AlertCircle, Calendar, Clock, FileWarning, ChevronDown } from 'lucide-react'
 import type { DashboardStats, DashboardYomiCustomer } from '@/types'
 import { ALL_STATUSES } from '@/types'
 import { CA_OPTIONS, DOC_SUBMIT_ALERT_BUSINESS_DAYS } from '@/lib/constants'
@@ -78,6 +78,8 @@ export function DashboardClient() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [caFilter, setCaFilter] = useState('')
+  // 書類提出遅れアラートの開閉（人数が多くなりがちなので初期状態は畳んでおく）
+  const [docAlertOpen, setDocAlertOpen] = useState(false)
 
   // 集計はすべてサーバー（DB）側で行う。以前は顧客・タスク・面談を全件取得して
   // 画面側で数えていたため、証明写真を含む全顧客データが表示のたびに転送されていた。
@@ -255,11 +257,19 @@ export function DashboardClient() {
       {/* 書類提出遅れアラート */}
       {docSubmitAlerts.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
-          <h2 className="font-bold text-amber-800 mb-1 flex items-center gap-2">
-            <FileWarning size={18} className="text-amber-500" />
-            書類提出が遅れている求職者（{docSubmitAlerts.length}人）
-          </h2>
-          <p className="text-xs text-amber-700/80 mb-3">
+          <button type="button" onClick={() => setDocAlertOpen(o => !o)} aria-expanded={docAlertOpen}
+            className="w-full flex items-center justify-between gap-2 text-left">
+            <h2 className="font-bold text-amber-800 flex items-center gap-2">
+              <FileWarning size={18} className="text-amber-500" />
+              書類提出が遅れている求職者（{docSubmitAlerts.length}人）
+            </h2>
+            <span className="flex items-center gap-1 text-xs text-amber-700/80 shrink-0">
+              {docAlertOpen ? '閉じる' : '一覧を見る'}
+              <ChevronDown size={16} className={cn('transition-transform', !docAlertOpen && '-rotate-90')} />
+            </span>
+          </button>
+          {docAlertOpen && (<>
+          <p className="text-xs text-amber-700/80 mt-1 mb-3">
             初回面談から{DOC_SUBMIT_ALERT_BUSINESS_DAYS}営業日以上たっても、まだどの求人にも応募（書類提出）していない求職者です。提案求人のステータスを「応募」にするか応募日を入力すると消えます。
           </p>
           <div className="space-y-2">
@@ -280,6 +290,7 @@ export function DashboardClient() {
               )
             })}
           </div>
+          </>)}
         </div>
       )}
 
