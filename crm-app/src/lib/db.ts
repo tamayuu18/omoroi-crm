@@ -17,6 +17,7 @@ import {
 import type { KpiRow, KpiLeadTimeRow, DashboardStats } from '@/types'
 import { normalizeCa, caWhere, caVariants } from './ca'
 import { businessDaysBetween, calendarDaysBetween, jstDayEndUtc } from './leadTime'
+import type { KpiRange } from './kpiPeriod'
 
 // 担当CA名を持つレコードの作成・更新時に、CA名の表記ゆれ（例: 「岩田珠優（社用）」）を正式名へ寄せる
 function withNormalizedCa<T extends { ca?: string | null }>(data: T): T {
@@ -502,21 +503,19 @@ async function getDocSubmitAlerts(ca?: string): Promise<DashboardStats['docSubmi
 }
 
 // ========== CA別KPI自動集計 ==========
-// month: 'YYYY-MM'。面談設定数/初回面談数はMeetingの面談日基準で集計する。
-// 求人提案数/選考数/面接数/内定数/内定承諾数は、求職者の初回面談月を基準に集計する
-// （その求職者への提案・選考等が実際に発生した月ではなく、初回面談があった月の実績として計上する）。
+// range: 集計期間 [start, end)（月別なら1ヶ月、「3ヶ月以内」なら今日までの3ヶ月。kpiPeriod.ts 参照）。
+// 面談設定数/初回面談数はMeetingの面談日基準で集計する。
+// 求人提案数/選考数/面接数/内定数/内定承諾数は、求職者の初回面談日が期間内かどうかを基準に集計する
+// （その求職者への提案・選考等が実際に発生した時期ではなく、初回面談があった期間の実績として計上する）。
 // すべての指標は人数ベース：同一求職者に複数の面談・提案があっても各段階で1人として数える。
 //
 // 集計はすべてDB側（COUNT DISTINCT）で行い、アプリには CA ごとの件数だけを返す。
 // 以前は対象月の面談と提案の行を取得して Node 側で数えていた上、初回面談月の判定のために
 // 全期間の面談を groupBy で取得していた。
 
-// 月（'YYYY-MM'）の範囲 [start, end) を、SQLで比較できる形にする。
+// 集計期間 [start, end) を、SQLで比較できる形にする。
 // Prisma は DateTime を UTC の timestamp として保存しているので、比較値も UTC に固定する。
-function monthRangeSql(month: string) {
-  const [y, m] = month.split('-').map(Number)
-  const start = new Date(y, (m ?? 1) - 1, 1)
-  const end = new Date(y, m ?? 1, 1)
+function rangeSql({ start, end }: KpiRange) {
   return {
     startSql: Prisma.sql`(${start.toISOString()}::timestamptz AT TIME ZONE 'UTC')`,
     endSql: Prisma.sql`(${end.toISOString()}::timestamptz AT TIME ZONE 'UTC')`,
@@ -539,10 +538,10 @@ const firstInterviewHeldSql = () => Prisma.sql`(
   )
 )`
 
-// 対象月に初回面談をした求職者ごとのリードタイム（初回面談→書類提出、初回面談→一次面接実施）。
-// 集計対象は getKpi の提案系指標と同じ「初回面談月コホート」。
-export async function getKpiLeadTimes(month: string): Promise<KpiLeadTimeRow[]> {
-  const { startSql, endSql } = monthRangeSql(month)
+// 対象期間に初回面談をした求職者ごとのリードタイム（初回面談→書類提出、初回面談→一次面接実施）。
+// 集計対象は getKpi の提案系指標と同じ「初回面談日が期間内のコホート」。
+export async function getKpiLeadTimes(range: KpiRange): Promise<KpiLeadTimeRow[]> {
+  const { startSql, endSql } = rangeSql(range)
   try {
     const rows = await prisma.$queryRaw<{
       customerId: string; name: string; ca: string | null; status: string
@@ -603,8 +602,8 @@ export async function getKpiLeadTimes(month: string): Promise<KpiLeadTimeRow[]> 
   }
 }
 
-export async function getKpi(month: string): Promise<KpiRow[]> {
-  const { startSql, endSql } = monthRangeSql(month)
+export async function getKpi(range: KpiRange): Promise<KpiRow[]> {
+  const { startSql, endSql } = rangeSql(range)
 
   const emptyRow = (ca: string): KpiRow =>
     ({ ca, meetingsSet: 0, firstMeetings: 0, proposals: 0, selections: 0, applications: 0, interviews: 0, firstInterviews: 0, firstInterviewCustomers: 0, offers: 0, accepted: 0 })
@@ -652,9 +651,9 @@ export async function getKpi(month: string): Promise<KpiRow[]> {
 
   try {
     // 求人提案以降(求人提案数/選考数/内定数/内定承諾数)は「発生日」ではなく
-    // 「初回面談月」を基準に集計する。例: 6月に初回面談をした求職者が7月に
+    // 「初回面談日」を基準に集計する。例: 6月に初回面談をした求職者が7月に
     // 求人提案されても、その提案は6月の実績として数える。
-    // そのため、まず対象月に初回面談（最も古い非キャンセル面談）を迎えた
+    // そのため、まず対象期間に初回面談（最も古い非キャンセル面談）を迎えた
     // 求職者を特定し、その求職者の提案を発生時期に関わらずすべて集計する。
     //
     // 応募件数・一次面接実施件数は「応募社数ベース」＝提案（顧客×求人）ごとに1件として数える。

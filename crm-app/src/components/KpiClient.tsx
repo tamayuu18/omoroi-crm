@@ -5,7 +5,11 @@ import { BarChart3, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { KpiRow, KpiLeadTimeRow } from '@/types'
 import { DOC_SUBMIT_ALERT_BUSINESS_DAYS } from '@/lib/constants'
+import { KPI_PERIODS, KPI_PERIOD_LABELS, type KpiPeriod } from '@/lib/kpiPeriod'
 import { cn } from '@/lib/utils'
+
+// 表示モード: 月別 or 直近期間（1ヶ月以内 / 3ヶ月以内 / 半年以内 / 1年以内）
+type KpiView = 'month' | KpiPeriod
 
 // 月を1つずらす（'YYYY-MM'）
 function shiftMonth(month: string, delta: number): string {
@@ -69,7 +73,7 @@ function CaCard({ row }: { row: KpiRow }) {
           ))}
         </tbody>
       </table>
-      {total === 0 && <div className="px-4 py-2 text-xs text-gray-300">この月のデータはありません</div>}
+      {total === 0 && <div className="px-4 py-2 text-xs text-gray-300">この期間のデータはありません</div>}
     </div>
   )
 }
@@ -169,21 +173,25 @@ const EMPTY_TOTALS: KpiRow = {
 }
 
 export function KpiClient() {
+  const [view, setView] = useState<KpiView>('month')
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [rows, setRows] = useState<KpiRow[]>([])
   const [leadTimes, setLeadTimes] = useState<KpiLeadTimeRow[]>([])
+  const [range, setRange] = useState<{ start: string; end: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchKpi = useCallback(async () => {
     setLoading(true)
-    const res = await fetch(`/api/kpi?month=${month}`, { cache: 'no-store' })
+    const query = view === 'month' ? `month=${month}` : `period=${view}`
+    const res = await fetch(`/api/kpi?${query}`, { cache: 'no-store' })
     if (res.ok) {
       const data = await res.json()
       setRows(data.rows)
       setLeadTimes(data.leadTimes ?? [])
+      setRange(data.start && data.end ? { start: data.start, end: data.end } : null)
     }
     setLoading(false)
-  }, [month])
+  }, [view, month])
 
   useEffect(() => { fetchKpi() }, [fetchKpi])
 
@@ -206,6 +214,11 @@ export function KpiClient() {
   )
 
   const [y, m] = month.split('-')
+  // 説明文に出す期間の呼び方（月別: 「2026年10月」、直近期間: 「直近3ヶ月以内（7/19〜10/19）」）
+  const periodLabel = view === 'month'
+    ? `${y}年${Number(m)}月`
+    : `直近${KPI_PERIOD_LABELS[view]}${range ? `（${fmtDate(range.start)}〜${fmtDate(new Date(parseISO(range.end).getTime() - 1))}）` : ''}`
+  const periodNoun = view === 'month' ? 'この月' : 'この期間'
 
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-6 space-y-4">
@@ -213,16 +226,29 @@ export function KpiClient() {
         <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
           <BarChart3 size={20} className="text-[#0070D2]" /> KPI管理（CA別・自動集計）
         </h1>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setMonth(shiftMonth(month, -1))} className="p-1.5 text-gray-500 hover:text-gray-800 rounded hover:bg-gray-100"><ChevronLeft size={18} /></button>
-          <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
-          <button onClick={() => setMonth(shiftMonth(month, 1))} className="p-1.5 text-gray-500 hover:text-gray-800 rounded hover:bg-gray-100"><ChevronRight size={18} /></button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center rounded-lg border border-gray-200 bg-white p-0.5 text-xs">
+            {(['month', ...KPI_PERIODS] as KpiView[]).map(v => (
+              <button key={v} type="button" onClick={() => setView(v)}
+                className={cn('px-2.5 py-1 rounded-md whitespace-nowrap transition-colors',
+                  view === v ? 'bg-[#0070D2] text-white font-medium' : 'text-gray-600 hover:bg-gray-100')}>
+                {v === 'month' ? '月別' : KPI_PERIOD_LABELS[v]}
+              </button>
+            ))}
+          </div>
+          {view === 'month' && (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setMonth(shiftMonth(month, -1))} className="p-1.5 text-gray-500 hover:text-gray-800 rounded hover:bg-gray-100"><ChevronLeft size={18} /></button>
+              <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+              <button onClick={() => setMonth(shiftMonth(month, 1))} className="p-1.5 text-gray-500 hover:text-gray-800 rounded hover:bg-gray-100"><ChevronRight size={18} /></button>
+            </div>
+          )}
         </div>
       </div>
 
       <p className="text-xs text-gray-400">
-        「人」の数値は人数ベース（同じ求職者に複数の面談・提案があっても各段階で1人として計上）、「件」の数値は応募社数ベース（1人が2社に応募すれば2件）です。面談設定数・初回面談数は面談日、求人提案数以降は求職者の初回面談月を基準に自動集計しています（{y}年{Number(m)}月に初回面談をした求職者について、その後の提案・応募・選考・面接・内定・承諾もこの月の実績として計上）。一次面接実施率は「一次面接を1件以上実施した人数 ÷ 初回面談数」です。
+        「人」の数値は人数ベース（同じ求職者に複数の面談・提案があっても各段階で1人として計上）、「件」の数値は応募社数ベース（1人が2社に応募すれば2件）です。面談設定数・初回面談数は面談日、求人提案数以降は求職者の初回面談日を基準に自動集計しています（{periodLabel}に初回面談をした求職者について、その後の提案・応募・選考・面接・内定・承諾も{periodNoun}の実績として計上）。一次面接実施率は「一次面接を1件以上実施した人数 ÷ 初回面談数」です。
       </p>
 
       {loading ? (
