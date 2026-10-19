@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Link2, Loader2 } from 'lucide-react'
+import { X, Link2, Loader2, ClipboardPaste } from 'lucide-react'
 import type { Job } from '@/types'
 import { JOB_STATUS_OPTIONS } from '@/lib/constants'
+import { parseJobText } from '@/lib/jobTextParse'
 
 const inp =
   'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -52,8 +53,41 @@ export function JobFormModal({
   const [saving, setSaving] = useState(false)
   const [showPaste, setShowPaste] = useState(false)
   const [htmlPaste, setHtmlPaste] = useState('')
+  const [textPaste, setTextPaste] = useState('')
 
   const set = (k: keyof FormState, v: string) => setForm(p => ({ ...p, [k]: v }))
+
+  // 求人票ページをコピーしたベタ打ちテキストから各項目を自動入力する（ジョバディ等）。
+  // サーバーを介さずブラウザ内で解析する。拾えた項目だけ上書きし、残りは現在の入力を保持する。
+  function fillFromText(text: string) {
+    const t = text.trim()
+    if (!t) { setMsg('求人票のテキストを貼り付けてください'); return }
+    const d = parseJobText(t)
+    if (!d.company && !d.title && d.matched === 0) {
+      setMsg('テキストから求人項目を認識できませんでした。求人詳細ページ全体を選択してコピーしたものを貼り付けてください。')
+      return
+    }
+    setForm(p => ({
+      ...p,
+      company: d.company ?? p.company,
+      title: d.title ?? p.title,
+      area: d.area ?? p.area,
+      salary: d.salary ?? p.salary,
+      employment: d.employment ?? p.employment,
+      feeRate: d.feeRate ?? p.feeRate,
+      detail: d.detail ?? p.detail,
+      note: p.note || (d.note ?? ''),
+      source: d.source,
+      sourceUrl: p.sourceUrl || url,
+    }))
+    const label = d.source === 'jobady' ? 'ジョバディの求人票' : '貼り付けテキスト'
+    const missing = [!d.company && '企業名', !d.title && '職種'].filter(Boolean)
+    setMsg(
+      `${label}から ${d.matched} 項目を読み取りました。` +
+      (missing.length ? `${missing.join('・')}は認識できなかったので手入力してください。` : '') +
+      '内容を確認・修正して保存してください。'
+    )
+  }
 
   // URL取得（html未指定）またはHTML貼り付け（html指定）で下書きを取得する
   async function runScrape(html?: string) {
@@ -182,6 +216,34 @@ export function JobFormModal({
                 </button>
               </div>
             )}
+          </div>
+
+          {/* テキスト貼り付け取込（ジョバディ等：求人詳細ページを全選択→コピーしたベタ打ちテキスト） */}
+          <div className="bg-emerald-50/60 border border-emerald-100 rounded-lg p-3 space-y-2">
+            <label className="block text-xs font-medium text-gray-600 flex items-center gap-1">
+              <ClipboardPaste size={13} /> 求人票のテキストを貼り付けて自動入力（ジョバディ等）
+            </label>
+            <p className="text-[11px] text-gray-600 leading-relaxed">
+              求人詳細ページで全選択(⌘A / Ctrl+A)→コピーし、下の欄に貼り付けると、企業名・職種・勤務地・年収・雇用形態・報酬・求人詳細が自動で入ります。
+            </p>
+            <textarea
+              value={textPaste}
+              onChange={e => setTextPaste(e.target.value)}
+              onPaste={e => {
+                const pasted = e.clipboardData.getData('text')
+                if (!pasted.trim()) return
+                e.preventDefault()
+                setTextPaste(pasted)
+                fillFromText(pasted)
+              }}
+              rows={4}
+              placeholder="ここに求人票のテキストを貼り付け（貼り付けと同時に自動入力されます）"
+              className={inp + ' text-[11px] resize-y'}
+            />
+            <button type="button" onClick={() => fillFromText(textPaste)} disabled={!textPaste.trim()}
+              className="flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50">
+              <ClipboardPaste size={14} />テキストから取込
+            </button>
           </div>
 
           {msg && <p className="text-xs text-red-600">{msg}</p>}

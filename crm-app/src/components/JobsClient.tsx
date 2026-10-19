@@ -92,7 +92,7 @@ export function JobsClient() {
                   <span className={cn('text-xs px-2 py-0.5 rounded-full', statusColor[j.status] ?? 'bg-gray-100 text-gray-500')}>{j.status}</span>
                   {j.source && j.source !== 'manual' && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                      {j.source === 'circus' ? 'サーカス' : 'ジョビンズ'}
+                      {j.source === 'circus' ? 'サーカス' : j.source === 'jobady' ? 'ジョバディ' : 'ジョビンズ'}
                     </span>
                   )}
                 </div>
