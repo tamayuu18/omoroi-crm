@@ -1,4 +1,5 @@
 import { parse } from 'node-html-parser'
+import { normalizeGlyphs } from './text'
 
 // 求人票URLから抽出した下書き（Jobフォームへ流し込む）
 export type JobDraft = {
@@ -9,7 +10,7 @@ export type JobDraft = {
   employment?: string
   feeRate?: string
   detail?: string
-  source: 'circus' | 'jobins' | 'manual'
+  source: 'circus' | 'jobins' | 'jobuddy' | 'manual'
   sourceUrl: string
   // 自動取得の診断情報（UIで失敗理由を表示するため）
   // snippet: サーバーが実際に受け取ったHTMLの先頭抜粋（bot対策の遮断ページか本物かの判別用）
@@ -24,6 +25,7 @@ export function detectSource(url: string): JobDraft['source'] {
     const host = new URL(url).hostname
     if (host.includes('circus-job.com')) return 'circus'
     if (host.includes('jobins.jp')) return 'jobins'
+    if (host.includes('jobuddy.jp')) return 'jobuddy'
   } catch {
     /* 不正URL */
   }
@@ -264,6 +266,87 @@ function scrapeJobinsDom(html: string, url: string): JobDraft {
   return draft
 }
 
+// 「3,600,000円～6,000,000円」のような円表記を「360万円〜600万円」に直す（1万円未満の数は無視）
+export function toManYen(s: string): string | undefined {
+  const nums = [...s.matchAll(/(\d{1,3}(?:,\d{3})+|\d+)\s*円?/g)].map(m => Number(m[1].replace(/,/g, '')))
+  const vals = nums.filter(n => n >= 10000)
+  if (!vals.length) return undefined
+  const fmt = (n: number) => {
+    const man = n / 10000
+    return (Number.isInteger(man) ? String(man) : man.toFixed(1)) + '万円'
+  }
+  return vals.length >= 2 ? `${fmt(vals[0])}〜${fmt(vals[1])}` : fmt(vals[0])
+}
+
+// ===== jobuddy（ジョバディ）=====
+// 公開求人ページ https://jobuddy.jp/recruit/detail/<案件番号>/<枝番> はログイン不要で取得できる。
+// 管理画面の求人票URL（/admin/.../kyujin_post/<案件番号>/<枝番>）や応募URL（/entry/...）は
+// 同じ案件の公開ページURLに読み替える。
+export function toJobuddyPublicUrl(url: string): string {
+  const m = url.match(/jobuddy\.jp\/(?:admin\/[^/]+\/kyujin_post|entry|recruit\/detail)\/(\d+)\/(\w+)/)
+  return m ? `https://jobuddy.jp/recruit/detail/${m[1]}/${m[2]}` : url
+}
+
+// 公開ページは <div class="item"><h3>項目名</h3>…本文…</div> の並び（会社概要も同じ形）。
+// h3 ごとに本文を取り出し、見出し付きで詳細欄に並べる。
+function scrapeJobuddy(html: string, url: string): JobDraft {
+  const publicUrl = toJobuddyPublicUrl(url)
+  const draft: JobDraft = { source: 'jobuddy', sourceUrl: publicUrl }
+  const root = parse(html)
+  // タグ間の改行・インデントはレイアウト用なので除き、<br> と </p></li> だけを改行にする
+  const text = (el: { innerHTML: string } | null | undefined) =>
+    el ? normalizeGlyphs(stripTags(el.innerHTML.replace(/>\s+</g, '><').replace(/\s*<br\s*\/?>\s*/gi, '<br>')))
+      .split('\n').map(l => l.trim()).filter(l => l !== '・').join('\n').replace(/\n{3,}/g, '\n\n') : ''
+
+  const jp = findJobPosting(extractJsonLd(html))
+  draft.company = root.querySelector('.company-name')?.text.trim() || deepFindString(jp?.hiringOrganization, ['name'])
+
+  // 見出し(h3)ごとの本文。.item の中なら見出し以外の部分、そうでなければ見出しに続く兄弟要素
+  const blocks: { label: string; body: string }[] = []
+  for (const h3 of root.querySelectorAll('h3')) {
+    const label = h3.text.replace(/\s+/g, ' ').trim()
+    if (!label) continue
+    const item = h3.closest('.item')
+    let body = ''
+    if (item) {
+      const clone = parse(item.outerHTML)
+      clone.querySelector('.tag')?.remove()
+      clone.querySelector('h3')?.remove()
+      body = text(clone)
+    } else {
+      const tag = h3.closest('.tag') ?? h3
+      const parts: string[] = []
+      for (let el = tag.nextElementSibling; el; el = el.nextElementSibling) {
+        const cls = el.classNames
+        if (cls.includes('tag') || cls.includes('item') || /^h[23]$/i.test(el.tagName)) break
+        if (cls.includes('border') || el.querySelector('iframe, video')) continue
+        parts.push(text(el))
+      }
+      body = parts.filter(Boolean).join('\n')
+    }
+    body = body.trim()
+    if (body) blocks.push({ label, body })
+  }
+  const byLabel = (label: string) => blocks.find(b => b.label === label)?.body
+  const firstLine = (s: string | undefined) => s?.split('\n')[0]?.trim() || undefined
+
+  draft.title = root.querySelector('h1.kyujin-title')?.text.trim()
+    || (typeof jp?.title === 'string' ? jp.title.trim() : undefined)
+    || byLabel('職種')?.split('\n').pop()?.replace(/^・/, '').trim()
+  draft.employment = firstLine(byLabel('雇用形態'))
+  draft.area = firstLine(byLabel('勤務地'))
+  const annual = byLabel('初年度想定年収')
+  draft.salary = (annual && toManYen(annual)) || firstLine(byLabel('給与'))
+
+  const caseNo = deepFindString(jp?.identifier, ['value']) ?? publicUrl.match(/recruit\/detail\/(\d+)/)?.[1]
+  const detailParts = [
+    caseNo ? `案件番号: ${caseNo}` : undefined,
+    ...blocks.map(b => `【${b.label}】\n${b.body}`),
+  ].filter(Boolean)
+  if (detailParts.length) draft.detail = detailParts.join('\n\n')
+  return draft
+}
+
 // ===== JSON-LD(schema.org JobPosting) 解析 =====
 // 求人ページはSEO用に <script type="application/ld+json"> の JobPosting を持つことが多い。
 // これは生HTMLに含まれるため、サーバー取得でも読める。
@@ -454,6 +537,7 @@ async function fetchJobinsApi(uuid: string): Promise<unknown | undefined> {
 export function scrapeFromHtml(source: JobDraft['source'], html: string, url: string): JobDraft {
   const draft = source === 'circus' ? scrapeCircus(html, url)
     : source === 'jobins' ? scrapeJobins(html, url)
+    : source === 'jobuddy' ? scrapeJobuddy(html, url)
     : { source, sourceUrl: url }
   const extracted = !!(draft.company || draft.title)
   // 抽出できなかった場合は、スクレイパが残した診断（無ければHTML先頭抜粋）を添える
@@ -501,6 +585,9 @@ export async function scrapeJob(url: string): Promise<JobDraft> {
       }
     }
   }
+
+  // jobuddy は管理画面URLだとログイン画面に飛ばされるので、公開ページURLに読み替えて取得する
+  if (source === 'jobuddy') url = toJobuddyPublicUrl(url)
 
   try {
     const { html, status } = await fetchHtml(url)
