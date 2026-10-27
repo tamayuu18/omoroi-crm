@@ -5,7 +5,7 @@
 // （就業場所・福利厚生・加入保険のブロック）は、罫線に頼らず行の位置関係から読む。
 
 import { extractPdfLayout, linesOf, unwrapLines, type Cell, type CellLine, type PdfLayout, type TextRun } from './pdfLayout'
-import type { JobDraft } from './jobScrape'
+import { toManYen, toJobuddyPublicUrl, type JobDraft } from './jobScrape'
 
 // 求人票に現れるラベル（セル内の文字列がこれに一致したらラベルセルとみなす）
 const LABELS = [
@@ -143,18 +143,6 @@ class JobSheet {
 
 const KATAKANA_ONLY = /^[゠-ヿㇰ-ㇿー・\s（）()]+$/
 
-// 「3,600,000～6,000,000円」→「360万円〜600万円」
-function toManYen(s: string): string | undefined {
-  const nums = [...s.matchAll(/(\d{1,3}(?:,\d{3})+|\d+)\s*円?/g)].map(m => Number(m[1].replace(/,/g, '')))
-  const vals = nums.filter(n => n >= 10000)
-  if (!vals.length) return undefined
-  const fmt = (n: number) => {
-    const man = n / 10000
-    return (Number.isInteger(man) ? String(man) : man.toFixed(1)) + '万円'
-  }
-  return vals.length >= 2 ? `${fmt(vals[0])}〜${fmt(vals[1])}` : fmt(vals[0])
-}
-
 // 1文字だけの run で、同じ x に他の1文字 run が縦に並んでいるもの（縦書きラベルの一部）
 function isStackedChar(r: TextRun, runs: TextRun[]): boolean {
   if (r.text.length !== 1) return false
@@ -227,7 +215,8 @@ export function parseJobuddySheet(layout: PdfLayout): JobDraft {
 
   const caseNo = text.match(/案件番号\s*[：:]\s*([0-9A-Za-z-]+)/)?.[1]
   const footerUrl = layout.runs.find(r => r.y > layout.pageHeight - 30 && /^https?:\/\//.test(r.text))?.text
-  draft.sourceUrl = footerUrl ?? ''
+  // 求人票のフッターは管理画面URL（要ログイン）なので、同じ案件の公開ページURLに読み替える
+  draft.sourceUrl = footerUrl ? toJobuddyPublicUrl(footerUrl) : ''
 
   // 企業名（フリガナ行があれば除く）
   const nameCell = sheet.labelCell('事業所名')

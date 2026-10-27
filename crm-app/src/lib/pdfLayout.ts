@@ -7,6 +7,7 @@
 // 依存: pdfjs-dist（legacy build。Node/サーバーレスで動くようワーカー無しで使う）
 
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { normalizeGlyphs } from './text'
 
 // テキストの連なり（同一行で隙間なく隣接する文字列をまとめたもの）。座標は左上原点・pt単位
 export type TextRun = {
@@ -71,12 +72,6 @@ function mul(m1: Matrix, m2: Matrix): Matrix {
 
 function apply(m: Matrix, x: number, y: number): [number, number] {
   return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
-}
-
-// 康熙部首（U+2F00〜）など、見た目が同じ別コードポイントを通常の漢字に揃える
-// （ブラウザ印刷のPDFでフォント置換により「力」が「⼒」になっていることがある）
-export function normalizeGlyphs(s: string): string {
-  return s.replace(/[⺀-⻳⼀-⿕]/g, c => c.normalize('NFKC'))
 }
 
 // pdfjs の constructPath が持つパスデータから各サブパスの外接矩形を取り出す

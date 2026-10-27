@@ -119,7 +119,7 @@ export function JobFormModal({
       if (!res.ok) throw new Error()
       const d: JobDraft = await res.json()
       applyDraft(d, url)
-      const label = d.source === 'circus' ? 'サーカス' : d.source === 'jobins' ? 'ジョビンズ' : '対象外サイト'
+      const label = d.source === 'circus' ? 'サーカス' : d.source === 'jobins' ? 'ジョビンズ' : d.source === 'jobuddy' ? 'jobuddy' : '対象外サイト'
       if (d.company || d.title) {
         setMsg(`${label}から取得しました。内容を確認・修正して保存してください。`)
         setShowPaste(false)
@@ -188,7 +188,7 @@ export function JobFormModal({
           {/* URL取込 */}
           <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3 space-y-2">
             <label className="block text-xs font-medium text-gray-600 flex items-center gap-1">
-              <Link2 size={13} /> 求人票URLから自動取得（サーカス / ジョビンズ）
+              <Link2 size={13} /> 求人票URLから自動取得（サーカス / ジョビンズ / jobuddy）
             </label>
             <div className="flex gap-2">
               <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..." className={inp} />
