@@ -1,9 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { X, Link2, Loader2 } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { X, Link2, Loader2, FileText, Upload } from 'lucide-react'
 import type { Job } from '@/types'
+import type { JobDraft } from '@/lib/jobScrape'
 import { JOB_STATUS_OPTIONS } from '@/lib/constants'
+import { cn } from '@/lib/utils'
 
 const inp =
   'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -52,8 +54,56 @@ export function JobFormModal({
   const [saving, setSaving] = useState(false)
   const [showPaste, setShowPaste] = useState(false)
   const [htmlPaste, setHtmlPaste] = useState('')
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const set = (k: keyof FormState, v: string) => setForm(p => ({ ...p, [k]: v }))
+
+  // 取得した下書きをフォームに流し込む（空の項目は既存の入力を残す）
+  function applyDraft(d: JobDraft, fallbackUrl: string) {
+    setForm(p => ({
+      ...p,
+      company: d.company ?? p.company,
+      title: d.title ?? p.title,
+      area: d.area ?? p.area,
+      salary: d.salary ?? p.salary,
+      employment: d.employment ?? p.employment,
+      feeRate: d.feeRate ?? p.feeRate,
+      detail: d.detail ?? p.detail,
+      source: d.source ?? p.source,
+      sourceUrl: d.sourceUrl || fallbackUrl || p.sourceUrl,
+    }))
+  }
+
+  // 求人票PDF（jobuddy）をサーバーで解析してフォームに流し込む
+  async function importPdf(file: File) {
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      setMsg('PDFファイルを選択してください')
+      return
+    }
+    setPdfBusy(true)
+    setMsg('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/jobs/import-pdf', { method: 'POST', body: fd })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || `PDFの読み取りに失敗しました (${res.status})`)
+      applyDraft(d, '')
+      if (d.sourceUrl) setUrl(d.sourceUrl)
+      if (d.company || d.title) {
+        setMsg(`求人票PDF（${file.name}）から取得しました。内容を確認・修正して保存してください。`)
+      } else {
+        setMsg(d._debug?.error ?? 'PDFから求人情報を読み取れませんでした。手入力してください。')
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'PDFの読み取りに失敗しました')
+    } finally {
+      setPdfBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
 
   // URL取得（html未指定）またはHTML貼り付け（html指定）で下書きを取得する
   async function runScrape(html?: string) {
@@ -67,26 +117,15 @@ export function JobFormModal({
         body: JSON.stringify(html ? { url, html } : { url }),
       })
       if (!res.ok) throw new Error()
-      const d = await res.json()
-      setForm(p => ({
-        ...p,
-        company: d.company ?? p.company,
-        title: d.title ?? p.title,
-        area: d.area ?? p.area,
-        salary: d.salary ?? p.salary,
-        employment: d.employment ?? p.employment,
-        feeRate: d.feeRate ?? p.feeRate,
-        detail: d.detail ?? p.detail,
-        source: d.source ?? p.source,
-        sourceUrl: d.sourceUrl ?? url,
-      }))
+      const d: JobDraft = await res.json()
+      applyDraft(d, url)
       const label = d.source === 'circus' ? 'サーカス' : d.source === 'jobins' ? 'ジョビンズ' : '対象外サイト'
       if (d.company || d.title) {
         setMsg(`${label}から取得しました。内容を確認・修正して保存してください。`)
         setShowPaste(false)
       } else {
         // 失敗理由を診断情報から表示し、HTML貼り付けを促す
-        const dbg = d._debug ?? {}
+        const dbg: NonNullable<JobDraft['_debug']> = d._debug ?? { fetched: false, extracted: false }
         const parts = [
           dbg.error ? `理由: ${dbg.error}` : dbg.status ? `HTTP ${dbg.status}` : null,
           typeof dbg.length === 'number' ? `取得サイズ: ${dbg.length}文字` : null,
@@ -182,6 +221,34 @@ export function JobFormModal({
                 </button>
               </div>
             )}
+          </div>
+
+          {/* PDF取込（jobuddy の求人票） */}
+          <div
+            className={cn('border border-dashed rounded-lg p-3 space-y-2 transition-colors',
+              dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 bg-gray-50/60')}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragOver(false)
+              const f = e.dataTransfer.files?.[0]
+              if (f) importPdf(f)
+            }}
+          >
+            <label className="block text-xs font-medium text-gray-600 flex items-center gap-1">
+              <FileText size={13} /> 求人票PDFから自動取得（jobuddy の「求人票」を印刷したPDF）
+            </label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) importPdf(f) }} />
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={pdfBusy}
+                className="flex items-center gap-1.5 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm hover:bg-gray-100 disabled:opacity-50">
+                {pdfBusy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                {pdfBusy ? '読み取り中...' : 'PDFを選択'}
+              </button>
+              <span className="text-[11px] text-gray-500">ここにPDFをドラッグ＆ドロップしても取り込めます</span>
+            </div>
           </div>
 
           {msg && <p className="text-xs text-red-600">{msg}</p>}

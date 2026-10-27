@@ -63,7 +63,7 @@ model Job {
   employment String?        // 雇用形態
   feeRate   String?         // 手数料率
   status    String   @default("募集中")  // 募集中/停止/クローズ
-  source    String?         // 取得元媒体（circus / jobins / manual）
+  source    String?         // 取得元媒体（circus / jobins / jobuddy / manual）
   sourceUrl String?         // 元求人票URL
   detail    String?         // 求人詳細・条件
   note      String?

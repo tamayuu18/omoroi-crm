@@ -9,7 +9,7 @@ export type JobDraft = {
   employment?: string
   feeRate?: string
   detail?: string
-  source: 'circus' | 'jobins' | 'manual'
+  source: 'circus' | 'jobins' | 'jobuddy' | 'manual'
   sourceUrl: string
   // 自動取得の診断情報（UIで失敗理由を表示するため）
   // snippet: サーバーが実際に受け取ったHTMLの先頭抜粋（bot対策の遮断ページか本物かの判別用）
