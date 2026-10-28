@@ -46,6 +46,10 @@ export const maxDuration = 300 // 秒
  *
  * 二重登録の防止は、履歴本文の末尾に埋め込む `#src:<fileId>` マーカーで行うため、
  * DBのテーブル追加は不要です。
+ *
+ * 未処理ドキュメントは新しい面談から順に、NOTTA_CONCURRENCY 件（既定3件）ずつ
+ * 同時にAI生成して記録します。時間予算（CRON_TIME_BUDGET_MS、既定240秒）で
+ * 処理しきれなかった分は次回の実行に持ち越されます。
  */
 export async function GET(req: NextRequest) {
   // Vercelの実行時間上限（maxDuration=300秒）に達すると504で強制終了され、
@@ -277,18 +281,24 @@ export async function GET(req: NextRequest) {
     primary.push({ doc, customer: pre.customer, by: pre.by })
   }
 
+  // 新しい面談から順に処理する。1回の実行で処理しきれない日があっても、
+  // 前日の面談が古い未処理分の後回しにされて記録されない、という事態を防ぐ。
+  // （以前は作成日の古い順だったため、未処理分が溜まると前日の議事録が何日も入らなかった）
+  const byNewest = (a: Target, b: Target) => (b.doc.createdTime || '').localeCompare(a.doc.createdTime || '')
+  primary.sort(byNewest)
+  deferred.sort(byNewest)
   const targets = [...primary, ...deferred]
   let processed = 0
   let timeLimited = false
 
-  for (const t of targets) {
-    // 詳細議事録のAI生成は1件あたり1分前後かかるため、余裕を持って打ち切る
-    if (timeLeft() < 90_000) {
-      timeLimited = true
-      break
-    }
+  // 詳細議事録のAI生成は1件あたり1分前後かかるため、1件ずつ直列に処理すると
+  // 時間予算（既定240秒）の中で3件程度しか記録できず、1日の面談数がそれを
+  // 超えると記録漏れが起きていた。複数件を同時に生成して処理件数を増やす。
+  const concurrency = Math.max(1, Number(process.env.NOTTA_CONCURRENCY || 3))
+  let cursor = 0
+
+  const processOne = async (t: Target) => {
     const doc = t.doc
-    processed++
 
     try {
       let customer = t.customer
@@ -298,7 +308,7 @@ export async function GET(req: NextRequest) {
       if (!text.trim()) {
         skipped++
         details.push({ file: doc.name, skipped: '本文が空' })
-        continue
+        return
       }
 
       // 文字起こしから詳細議事録を生成する（Nottaの要約は参考情報として渡す）。
@@ -318,7 +328,7 @@ export async function GET(req: NextRequest) {
             推定した顧客名: post.name,
             ...(post.note ? { note: post.note } : {}),
           })
-          continue
+          return
         }
         customer = post.customer
         by = post.by
@@ -368,6 +378,21 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // 同時実行数ぶんのワーカーが、残り時間がある限り次のドキュメントを取りに行く
+  const worker = async () => {
+    while (cursor < targets.length) {
+      // 生成に1分前後かかるため、余裕を持って新規の着手をやめる
+      if (timeLeft() < 90_000) {
+        timeLimited = true
+        return
+      }
+      const t = targets[cursor++]
+      processed++
+      await processOne(t)
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+
   const remaining = targets.length - processed
   const summaryJson = {
     status: timeLimited ? 'partial' : 'ok',
@@ -389,6 +414,21 @@ export async function GET(req: NextRequest) {
   console.log(
     `[cron/notta] status=${summaryJson.status} total=${docs.length} added=${added} notMatched=${notMatched} skipped=${skipped} errored=${errored}${timeLimited ? ` remaining=${remaining}` : ''}`
   )
+  // Cronの実行ではレスポンスJSONを誰も読まないため、記録できなかった理由もログに残す
+  for (const d of details) {
+    if (d.matched === false) {
+      console.log(`[cron/notta] 未照合: ${d.file} / 推定した顧客名=${d.推定した顧客名 || ''}${d.note ? ` / ${d.note}` : ''}`)
+    } else if (d.error) {
+      console.error(`[cron/notta] エラー: ${d.file} / ${d.error}`)
+    } else if (d.skipped) {
+      console.log(`[cron/notta] スキップ: ${d.file} / ${d.skipped}`)
+    } else if (d.matched) {
+      console.log(`[cron/notta] 記録: ${d.file} → ${d.customer}（${d.by}）`)
+    }
+  }
+  if (timeLimited) {
+    console.warn(`[cron/notta] 時間制限のため未処理 ${remaining} 件: ${targets.slice(processed).map((t) => t.doc.name).join(' | ')}`)
+  }
 
   return NextResponse.json(summaryJson)
 }
