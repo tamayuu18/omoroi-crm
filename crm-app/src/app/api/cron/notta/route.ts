@@ -9,7 +9,7 @@ import {
   loadCustomerIndex,
   matchCustomerDetailed,
 } from '@/lib/meetingMinutes'
-import { isDetailedMinutes } from '@/lib/minutesFormat'
+import { isDetailedMinutes, MINUTES_FIRST_HEADING } from '@/lib/minutesFormat'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,6 +43,15 @@ export const maxDuration = 300 // 秒
  * 本文が新フォーマット（## 面談概要 で始まる）の履歴は対象外です。
  * 1件ごとにAI生成が走るため、時間制限で途中終了したら再実行してください
  * （作り直し済みの履歴は次回スキップされます）。新しい面談から順に処理します。
+ *
+ * 通常の実行でも、新しいドキュメントの取り込みが終わって時間が残っていれば、
+ * 詳細議事録になっていない過去の履歴（文字起こしのまま・要約のまま）を
+ * 新しい面談から順に自動で作り直します（1回の実行で最大 NOTTA_AUTO_REWRITE_MAX 件、
+ * 既定3件。NOTTA_AUTO_REWRITE=0 で無効）。手動の rewrite モードを待たずに、
+ * 日次実行の積み重ねで文字起こしのままの履歴が解消されます。
+ *
+ * ANTHROPIC_API_KEY が未設定のときは何も記録しません（文字起こしをそのまま
+ * 保存すると取り込み済み扱いになり、あとからAI議事録に差し替わらないため）。
  *
  * 二重登録の防止は、履歴本文の末尾に埋め込む `#src:<fileId>` マーカーで行うため、
  * DBのテーブル追加は不要です。
@@ -223,6 +232,16 @@ export async function GET(req: NextRequest) {
     })
   }
 
+  // AI生成ができない状態では記録しない。以前は文字起こしをそのまま保存していたが、
+  // そのファイルは取り込み済みと判定されて、キー設定後も議事録に差し替わらなかった。
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error('[cron/notta] ANTHROPIC_API_KEY が未設定のため、議事録の生成・記録を行いませんでした')
+    return NextResponse.json(
+      { status: 'error', error: 'ANTHROPIC_API_KEY が未設定のため議事録を生成できません。設定後に再実行してください。', total: docs.length },
+      { status: 500 }
+    )
+  }
+
   // 取り込み済みのファイルIDを、既存履歴のマーカーから収集（1クエリ）。
   // 議事録本文をすべて取得すると毎日の実行で全議事録が転送されてしまうため、
   // マーカー部分（#src:<fileId>）だけをDB側で抜き出して受け取る。
@@ -369,6 +388,64 @@ export async function GET(req: NextRequest) {
   }
 
   const remaining = targets.length - processed
+
+  // 新しいドキュメントの取り込みが終わって時間が残っていれば、詳細議事録に
+  // なっていない過去の履歴（文字起こしのまま・Notta要約のまま）を新しい面談から
+  // 順に作り直す。手動の rewrite モードと同じ処理を、日次実行の余り時間で少しずつ行う。
+  const autoRewrite = process.env.NOTTA_AUTO_REWRITE !== '0'
+  const autoRewriteMax = Math.max(0, Number(process.env.NOTTA_AUTO_REWRITE_MAX || 3))
+  let rewritten = 0
+  let rewriteErrored = 0
+  let rewriteRemaining = 0
+  const rewriteDetails: any[] = []
+  if (autoRewrite && autoRewriteMax > 0 && !timeLimited) {
+    try {
+      // 本文全体を転送しないよう、必要な列とマーカー部分だけをDB側で抜き出す
+      const pending = await prisma.$queryRaw<
+        { id: string; name: string; date: Date | null; fileId: string; len: number }[]
+      >`
+        SELECT "id", "name", "date",
+               (regexp_matches("content", '#src:([A-Za-z0-9_-]+)'))[1] AS "fileId",
+               length("content")::int AS "len"
+        FROM "History"
+        WHERE "createdBy" = 'Notta自動連携'
+          AND "content" LIKE '%#src:%'
+          AND ltrim("content") NOT LIKE ${`${MINUTES_FIRST_HEADING}%`}
+        ORDER BY "date" DESC
+        LIMIT ${autoRewriteMax + 1}
+      `
+      rewriteRemaining = pending.length
+      const nameById = new Map(docs.map((d) => [d.id, d.name]))
+
+      for (const h of pending.slice(0, autoRewriteMax)) {
+        if (timeLeft() < 90_000) break
+        const file = nameById.get(h.fileId) || h.fileId
+        const date = h.date ? new Date(h.date).toISOString().slice(0, 10) : ''
+        try {
+          const text = await exportDocText(h.fileId)
+          if (!text.trim()) {
+            rewriteDetails.push({ file, customer: h.name, date, skipped: '本文が空' })
+            continue
+          }
+          const ex = await generateMinutes(file, text)
+          await prisma.history.update({
+            where: { id: h.id },
+            data: { content: `${ex.minutes}\n\n<!-- #src:${h.fileId} -->` },
+          })
+          rewritten++
+          rewriteRemaining--
+          rewriteDetails.push({ file, customer: h.name, date, source: ex.source, 文字数: `${h.len} → ${ex.minutes.length}` })
+        } catch (e: any) {
+          rewriteErrored++
+          rewriteDetails.push({ file, customer: h.name, date, error: String(e?.message || e).slice(0, 500) })
+        }
+      }
+    } catch (e: any) {
+      rewriteErrored++
+      rewriteDetails.push({ error: `作り直し対象の取得に失敗: ${String(e?.message || e).slice(0, 500)}` })
+    }
+  }
+
   const summaryJson = {
     status: timeLimited ? 'partial' : 'ok',
     total: docs.length,
@@ -383,11 +460,22 @@ export async function GET(req: NextRequest) {
         }
       : {}),
     details,
+    ...(autoRewrite
+      ? {
+          過去履歴の作り直し: {
+            rewritten,
+            errored: rewriteErrored,
+            // 作り直しがまだ必要な履歴の件数（上限+1件までしか数えないため「以上」）
+            未対応: rewriteRemaining > autoRewriteMax ? `${autoRewriteMax}件以上` : rewriteRemaining,
+            details: rewriteDetails,
+          },
+        }
+      : {}),
   }
 
   // Vercelのログで実行結果を確認できるように要点を出力する
   console.log(
-    `[cron/notta] status=${summaryJson.status} total=${docs.length} added=${added} notMatched=${notMatched} skipped=${skipped} errored=${errored}${timeLimited ? ` remaining=${remaining}` : ''}`
+    `[cron/notta] status=${summaryJson.status} total=${docs.length} added=${added} notMatched=${notMatched} skipped=${skipped} errored=${errored}${timeLimited ? ` remaining=${remaining}` : ''} rewritten=${rewritten} rewriteErrored=${rewriteErrored}`
   )
 
   return NextResponse.json(summaryJson)
