@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { MINUTES_RULES, MINUTES_TEMPLATE } from '@/lib/minutesFormat'
+import { MINUTES_FIRST_HEADING, MINUTES_RULES, MINUTES_TEMPLATE } from '@/lib/minutesFormat'
 
 export type Extracted = {
   personName: string
@@ -350,6 +350,19 @@ function splitMinutesAndMeta(out: string): { minutes: string; meta: Meta } {
   return { minutes: out.slice(0, m.index).trim(), meta }
 }
 
+/**
+ * 生成結果が「議事録」ではなく文字起こしの写しになっていないかを判定する。
+ * 雛形の見出しがひとつも無く、「発言者 1 00:12」のようなタイムスタンプ行が
+ * 多数含まれていれば、文字起こしをそのまま返してきたものとみなす。
+ */
+function isTranscriptLike(body: string): boolean {
+  if (body.includes(MINUTES_FIRST_HEADING)) return false
+  const lines = body.split(/\r?\n/).filter((l) => l.trim())
+  if (lines.length < 10) return false
+  const ts = lines.filter((l) => isTimestampLine(l)).length
+  return ts / lines.length > 0.3
+}
+
 /** 文字起こし本文のうち、AIに渡す部分を返す（長すぎる場合は先頭を使用） */
 function clip(text: string): { text: string; clipped: boolean } {
   if (text.length <= MAX_INPUT_CHARS) return { text, clipped: false }
@@ -469,7 +482,16 @@ export async function generateMinutes(fileName: string, docText: string): Promis
   }
 
   const { minutes: body, meta } = splitMinutesAndMeta(out)
-  let minutes = body || `## 面談メモ\n\n${primary.text.slice(0, 4000)}`
+  // 本文が返ってこなかった場合（応答が空・拒否・メタデータのみ等）は、
+  // 文字起こしをそのまま記録せずエラーにする。呼び出し側で errored として
+  // 報告され、次回の実行で再試行される（文字起こしのまま保存されると、
+  // そのファイルは取り込み済みと判定されて二度と作り直されないため）。
+  if (!body || isTranscriptLike(body)) {
+    throw new Error(
+      `AIから議事録本文が返りませんでした（stop_reason=${String(data?.stop_reason || '')}, 本文${body.length}文字）: ${fileName}`
+    )
+  }
+  let minutes = body
   if (source === '要約') {
     minutes += '\n\n> ※ このドキュメントには文字起こしが無いため、Nottaの要約をもとに作成しています。'
   }
