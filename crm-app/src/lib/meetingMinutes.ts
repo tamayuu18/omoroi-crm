@@ -1,4 +1,6 @@
 import { prisma } from '@/lib/prisma'
+import { CA_OPTIONS } from '@/lib/constants'
+import { normalizeCa } from '@/lib/ca'
 import { MINUTES_FIRST_HEADING, MINUTES_RULES, MINUTES_TEMPLATE } from '@/lib/minutesFormat'
 
 export type Extracted = {
@@ -90,6 +92,53 @@ export function guessNameFromFileName(fileName: string): string {
     .trim()
 
   return seg
+}
+
+/** 語が担当CAの名前（または姓だけの省略形。例: 岩田 → 岩田珠優）かどうか */
+function isCaToken(token: string): boolean {
+  const t = normalizeCa(token)
+  if (!t || t.length < 2) return false
+  return CA_OPTIONS.some((ca) => ca === t || ca.startsWith(t))
+}
+
+/**
+ * ファイル名から氏名候補を複数返す（照合は先頭から順に試す）。
+ *
+ * 「長谷川璃空　丸山様 面談」「長谷川璃空 小川さん再面談」のように区切り（: や /）が無く
+ * CA名と顧客名が空白で並んでいるファイル名では、guessNameFromFileName は
+ * 「長谷川璃空 丸山」を返して照合に失敗していた。そこで
+ *   1. 全体（氏名の中に空白があるケース「山口 結衣」はこれで一致する）
+ *   2. 担当CAの名前にあたる語を除いたもの（長谷川璃空 丸山 → 丸山）
+ *   3. 最後の語だけ（CAが未登録の名前で書かれていた場合の保険）
+ * の順に候補を返す。
+ */
+export function guessNameCandidates(fileName: string): string[] {
+  const full = guessNameFromFileName(fileName)
+  if (!full) return []
+  const out = [full]
+  const tokens = full.split(' ').filter(Boolean)
+  if (tokens.length >= 2) {
+    const nonCa = tokens.filter((t) => !isCaToken(t))
+    if (nonCa.length > 0 && nonCa.length < tokens.length) out.push(nonCa.join(' '))
+    const last = tokens[tokens.length - 1]
+    if (last.length >= 2) out.push(last)
+  }
+  return Array.from(new Set(out))
+}
+
+/**
+ * ファイル名末尾の「 - 2026-11-05 11:32:45」（Nottaが付ける書き出し日時・日本時間）を Date にする。
+ * 取れなければ null。対応履歴の日付を「cronが動いた日」ではなく面談日にするために使う。
+ */
+export function parseDateFromFileName(fileName: string): Date | null {
+  const m = fileName.match(
+    /(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?(?:\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?)?\s*$/
+  )
+  if (!m) return null
+  const [, y, mo, d, h = '0', mi = '0', sec = '0'] = m
+  const pad = (v: string) => v.padStart(2, '0')
+  const dt = new Date(`${y}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:${pad(sec)}+09:00`)
+  return Number.isNaN(dt.getTime()) ? null : dt
 }
 
 /* ------------------------------------------------------------------ *
@@ -255,9 +304,9 @@ export async function matchCustomerDetailed(
   const phone = normPhone(ex.phone || '')
 
   // ファイル名から取れた氏名を最優先。取れなければLLMが本文から拾った氏名。
-  const fromFile = guessNameFromFileName(fileName)
+  const fileCands = guessNameCandidates(fileName)
   const fromBody = (ex.personName || '').trim()
-  const name = fromFile || fromBody
+  const name = fileCands[0] || fromBody
   const pick = (c: IndexedCustomer): CustomerLite => ({ id: c.id, name: c.name, ca: c.ca })
 
   if (email) {
@@ -273,7 +322,7 @@ export async function matchCustomerDetailed(
     if (hit) return { customer: pick(hit), by: 'phone', name }
   }
 
-  for (const cand of [name, fromBody].filter(Boolean)) {
+  for (const cand of Array.from(new Set([...fileCands, fromBody].filter(Boolean)))) {
     const n = normName(cand)
     if (n.length < 2) continue
 
@@ -326,6 +375,18 @@ const MAX_INPUT_CHARS = Number(process.env.MINUTES_MAX_INPUT_CHARS || 150_000)
 /** 議事録本文の出力上限トークン。詳細議事録（数千字）が収まる余裕を持たせる */
 const MAX_OUTPUT_TOKENS = Number(process.env.MINUTES_MAX_OUTPUT_TOKENS || 8000)
 
+/**
+ * 生成時の思考の深さ（low / medium / high）。未設定ならAPIの既定（high）。
+ * 1件あたりの生成時間が長く、Vercelの実行時間上限（Hobbyは300秒）に収まらないときは
+ * medium にすると短くなる。
+ */
+const MINUTES_EFFORT = (process.env.MINUTES_EFFORT || '').trim()
+
+export type GenerateOptions = {
+  /** この時間内にAIの応答が返らなければ中断してエラーにする（ミリ秒）。省略時は無制限 */
+  timeoutMs?: number
+}
+
 type Meta = {
   personName?: string
   kana?: string
@@ -376,7 +437,11 @@ function clip(text: string): { text: string; clipped: boolean } {
  * - 文字起こしが無く要約だけのドキュメントは、要約の内容を落とさずに整形する
  * - ANTHROPIC_API_KEY が無い場合は、本文を整形せずそのまま返す
  */
-export async function generateMinutes(fileName: string, docText: string): Promise<Extracted> {
+export async function generateMinutes(
+  fileName: string,
+  docText: string,
+  opts: GenerateOptions = {}
+): Promise<Extracted> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   const parts = splitNottaDoc(docText)
   const source: Extracted['source'] = parts.transcript ? '文字起こし' : parts.summary ? '要約' : '文字起こし'
@@ -452,20 +517,34 @@ export async function generateMinutes(fileName: string, docText: string): Promis
     )
   }
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system,
-      messages: [{ role: 'user', content: user.join('\n') }],
-    }),
-  })
+  // Vercelの実行時間上限で関数ごと強制終了されると、処理結果の記録も応答も残らない。
+  // 呼び出し側から渡された残り時間で打ち切り、1件のエラーとして報告させる。
+  let res: Response
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        ...(MINUTES_EFFORT ? { output_config: { effort: MINUTES_EFFORT } } : {}),
+        system,
+        messages: [{ role: 'user', content: user.join('\n') }],
+      }),
+      ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
+    })
+  } catch (e: any) {
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      throw new Error(
+        `AIの応答が${Math.round((opts.timeoutMs || 0) / 1000)}秒以内に返らなかったため中断しました（次回の実行で再試行します）: ${fileName}`
+      )
+    }
+    throw e
+  }
 
   if (!res.ok) {
     throw new Error(`Anthropic API error: ${res.status} ${await res.text()}`)

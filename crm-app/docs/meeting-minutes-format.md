@@ -98,6 +98,38 @@ Nottaの要約は数行の概要とアクションアイテムだけなので、
 | nextContent（次回予定） | 次回アクション（AI抽出） |
 | nextDeadline（次回期日） | 次回期日（AI抽出、あれば） |
 
+## 議事録が対応履歴に出てこない（連携されない）ときの確認手順
+
+2026-11 の調査で分かった、取り込みが止まって見える主な原因と対策です。
+
+| 原因 | 症状 | 対策（2026-11 の変更） |
+| --- | --- | --- |
+| 処理が**古い面談から順**だった | 未処理が溜まると直近の面談がいつまでも出てこない | 新しい面談（ファイル名の日時）から順に処理する |
+| 1回の実行で処理できるのが2〜3件（AI生成1件 1〜3分、Vercel Hobby は最長300秒・cron は1日1回） | 面談が多い日が続くと追いつかない | 直前の1件の所要時間を見て安全に打ち切る。**1時間ごとに呼び出す Apps Script トリガー**（リポジトリ直下 `nottaTrigger.gs`）を用意 |
+| AI生成が長引くと関数ごと強制終了（504） | その日の実行結果が何も残らない | AI・Driveの各リクエストに残り時間に合わせた上限時間を付け、必ず応答を返す |
+| ファイル名に氏名が無いドキュメント（「Google Meetからの新しいノート」）が照合できないまま**毎日AI生成を繰り返す** | 他の面談の処理時間を毎日消費 | 1回の実行で1件まで・作成から14日以内のものだけ対象（`NOTTA_DEFERRED_*`） |
+| 「長谷川璃空　丸山様 面談」のように区切り（`:` `/`）が無くCA名と顧客名が並ぶファイル名 | 「CRMに該当の顧客が見つかりません」で未照合 | 敬称直前の語（丸山）も候補にして照合する |
+| 対応履歴の日付が cron の実行日だった | 遅れて取り込まれた面談が別の日付に見える | ファイル名末尾の日時（面談日）を履歴の日付にする |
+| Vercel Hobby のログは1時間で消える | 翌日に結果を確認できない | 実行ごとの結果を `CronRun` テーブルに保存。`?runs=1` で参照 |
+
+確認の順番:
+
+1. 直近の実行結果を見る。
+   ```
+   GET /api/cron/notta?key=<CRON_SECRET>&runs=1
+   ```
+   `summary.added` が取り込み件数、`summary.details[].error` がエラー内容、`summary.details[].matched: false` が未照合です。
+   記録が1件も無ければ cron 自体が動いていません（Vercel の Settings → Cron Jobs を確認）。
+2. 未照合（`matched: false`）が多ければ、ファイル名から推定した顧客名と CRM の氏名を見比べます。
+   ```
+   GET /api/cron/notta?key=<CRON_SECRET>&dry=2
+   ```
+   Notta のファイル名は「CA名 面談: 顧客名様」の形にしておくと確実です。CRMに未登録の顧客は先に登録してください。
+3. `error` に `Anthropic API error: 401/404` があれば Vercel の `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`（現在提供されているモデルID）を、
+   `Google認証に失敗` / `Drive一覧の取得に失敗` があればサービスアカウント（`notta-bot@…`）が Notta フォルダに閲覧者で共有されているかを確認します。
+4. `status: partial` が続く（`残り` が減らない）なら処理が追いついていません。`nottaTrigger.gs` のトリガーを有効にするか、
+   Vercel Pro にして `vercel.json` の実行回数を増やしてください。生成時間を短くしたい場合は `MINUTES_EFFORT=medium` も有効です。
+
 ## 過去の議事録を新フォーマットで作り直す
 
 以前の実行で要約のまま保存された履歴は、`rewrite` モードで作り直せます。
@@ -128,7 +160,10 @@ GET /api/cron/notta?key=<CRON_SECRET>&rewrite=1
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | 議事録生成に使うモデル |
 | `MINUTES_MAX_INPUT_CHARS` | `150000` | AIに渡す文字起こしの上限文字数（超えた分は先頭のみ使用） |
 | `MINUTES_MAX_OUTPUT_TOKENS` | `8000` | 議事録本文の出力上限トークン |
-| `CRON_TIME_BUDGET_MS` | `240000` | 1回の実行で使う時間。残り90秒を切ると次の面談には着手しない |
+| `MINUTES_EFFORT` | （未設定＝APIの既定） | 生成時の思考の深さ `low` / `medium` / `high`。1件の生成が長すぎるときは `medium` |
+| `CRON_TIME_BUDGET_MS` | `240000` | 1回の実行で使う時間。残りが「直前の1件の所要時間×1.2（最低90秒）」を切ると次の面談には着手しない |
+| `NOTTA_DEFERRED_MAX_PER_RUN` | `1` | ファイル名に氏名が無いドキュメント（本文からのAI照合が必要）を1回の実行で処理する最大件数 |
+| `NOTTA_DEFERRED_MAX_AGE_DAYS` | `14` | ファイル名に氏名が無いドキュメントのうち、作成からこの日数を超えたものは対象外にする |
 
 ## 「議事録が文字起こししかない」ときの確認手順
 
@@ -144,7 +179,8 @@ GET /api/cron/notta?key=<CRON_SECRET>&rewrite=1
 
 ## 運用上の注意
 
-- 1回の cron 実行で処理できるのは数件（1件1分前後）です。面談が多い日は `status: partial` になり、
-  翌日の実行で続きを処理します。溜まる場合は `GET /api/cron/notta?key=<CRON_SECRET>` を手動で呼ぶか、
-  `vercel.json` の実行回数を増やしてください。
+- 1回の cron 実行で処理できるのは数件（1件1〜3分）です。面談が多い日は `status: partial` になり、
+  次の実行で続きを処理します（新しい面談から順）。溜まる場合は `nottaTrigger.gs` の1時間ごとトリガーを使うか、
+  `GET /api/cron/notta?key=<CRON_SECRET>` を手動で呼ぶか、Vercel Pro にして `vercel.json` の実行回数を増やしてください。
+- 実行結果は `GET /api/cron/notta?key=<CRON_SECRET>&runs=1` で後から確認できます（Vercel Hobby のログは1時間で消えます）。
 - 生成された議事録は対応履歴の「続きを見る」で全文を確認できます。

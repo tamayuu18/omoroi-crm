@@ -13,6 +13,9 @@ import crypto from 'crypto'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
 
+/** Drive API 1リクエストの上限時間。応答が無いまま関数の実行時間を使い切らないようにする */
+const REQUEST_TIMEOUT_MS = 45_000
+
 function b64url(input: Buffer | string): string {
   return Buffer.from(input)
     .toString('base64')
@@ -104,6 +107,7 @@ export async function listNottaDocs(folderId: string): Promise<DriveDoc[]> {
 
     const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
       headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
     if (!res.ok) {
       throw new Error(`Drive一覧の取得に失敗しました: ${res.status} ${await res.text()}`)
@@ -131,6 +135,7 @@ export async function exportDocText(fileId: string): Promise<string> {
   const params = new URLSearchParams({ mimeType: 'text/plain', supportsAllDrives: 'true' })
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/export?${params}`, {
     headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   if (!res.ok) {
     throw new Error(`本文の取得に失敗しました: ${res.status} ${await res.text()}`)

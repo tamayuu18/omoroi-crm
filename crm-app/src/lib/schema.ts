@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { ensureCronRunTable } from '@/lib/cronRun'
 
 /**
  * テーブル作成（冪等）。
@@ -228,4 +229,7 @@ export async function ensureSchema() {
         FOREIGN KEY ("proposalId") REFERENCES "JobProposal"("id") ON DELETE CASCADE ON UPDATE CASCADE;
     EXCEPTION WHEN duplicate_object THEN NULL; END $$
   `
+
+  // ---- CronRun（定期実行の実行記録）----
+  await ensureCronRunTable()
 }
